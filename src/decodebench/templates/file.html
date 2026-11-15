@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ detail.rel_path }} · 采文解码台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main>
+  <nav>
+    <a href="{{ url_for('index') }}">批次列表</a>
+    {% if batch %}<span>/</span><a href="{{ url_for('batch_detail', batch_id=batch.batch_id) }}">批次 {{ batch.batch_id }}</a>{% endif %}
+  </nav>
+  <header>
+    <p class="eyebrow">file evidence / read only</p>
+    <h1>{{ detail.rel_path }}</h1>
+    <p class="lede mono">SHA-256 {{ detail.source_sha256 }}</p>
+  </header>
+
+  <section class="stats">
+    <div><strong>{{ detail.final_encoding }}</strong><span>最终编码</span></div>
+    <div><strong>{{ "%.6f"|format(detail.confidence) }}</strong><span>置信度</span></div>
+    <div><strong>{{ detail.method }}</strong><span>决策方法</span></div>
+    <div><strong>{{ detail.risk_level }}</strong><span>乱码风险</span></div>
+  </section>
+
+  {% if detail.decision %}
+  <section class="panel">
+    <h2>最终决策</h2>
+    <p>{{ detail.decision.reason }}</p>
+    <dl class="facts">
+      <dt>错误码</dt><dd>{{ detail.decision.error_codes|join(", ") or "无" }}</dd>
+      <dt>冲突</dt><dd>{{ detail.decision.conflicts|join("；") or "无" }}</dd>
+    </dl>
+  </section>
+  {% endif %}
+
+  <section class="panel">
+    <h2>编码证据链</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>来源</th><th>声明</th><th>行</th><th>字节偏移</th><th>与决策一致</th><th>说明</th></tr></thead>
+        <tbody>
+        {% for item in detail.evidence %}
+          <tr>
+            <td>{{ item.ordinal }}</td>
+            <td>{{ item.source }}</td>
+            <td>{{ item.declared or "-" }}</td>
+            <td class="num">{{ item.line_number if item.line_number is not none else "-" }}</td>
+            <td class="num">{{ item.byte_offset if item.byte_offset is not none else "-" }}</td>
+            <td>{% if item.matches_decision is none %}-{% elif item.matches_decision %}是{% else %}否{% endif %}</td>
+            <td>{{ item.note }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="empty">无证据记录。</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>转码输出</h2>
+    <dl class="facts">
+      <dt>状态</dt><dd>{{ "成功" if detail.transcode_success else "失败" }}</dd>
+      <dt>输出路径</dt><dd class="mono">{{ detail.output_rel_path or "-" }}</dd>
+      <dt>输出 SHA-256</dt><dd class="mono">{{ detail.output_sha256 or "-" }}</dd>
+      <dt>字符替换</dt><dd>{{ "是" if detail.replacement_used else "否" }}</dd>
+    </dl>
+  </section>
+
+  <section class="panel">
+    <h2>警告</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>错误码</th><th>级别</th><th>行</th><th>偏移</th><th>信息</th><th>片段</th></tr></thead>
+        <tbody>
+        {% for item in detail.warnings %}
+          <tr>
+            <td>{{ item.code }}</td>
+            <td>{{ item.severity }}</td>
+            <td class="num">{{ item.line_number if item.line_number is not none else "-" }}</td>
+            <td class="num">{{ item.byte_offset if item.byte_offset is not none else "-" }}</td>
+            <td>{{ item.message }}</td>
+            <td class="mono">{{ item.snippet }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="empty">无警告。</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+</body>
+</html>

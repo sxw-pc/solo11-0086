@@ -1,0 +1,7 @@
+{
+  "status": 200,
+  "url": "http://example.invalid/captures/gb-meta-conflict",
+  "headers": {
+    "Content-Type": "text/html"
+  }
+}

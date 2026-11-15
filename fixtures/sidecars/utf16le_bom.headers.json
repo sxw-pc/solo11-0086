@@ -1,0 +1,7 @@
+{
+  "status": 200,
+  "url": "http://example.invalid/captures/utf16le",
+  "headers": {
+    "Content-Type": "application/xml; charset=utf-16le"
+  }
+}

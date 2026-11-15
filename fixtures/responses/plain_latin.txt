@@ -1,0 +1,3 @@
+Plain Latin sample.
+The editor noted “naïve café résumé” and an em dash — all stored in Windows-1252.
+A second line keeps the evidence readable.

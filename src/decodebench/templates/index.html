@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>采文解码台 · 复核台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">decodebench / read-only console</p>
+    <h1>采文解码台复核台</h1>
+    <p class="lede">本地编码证据与转码决策浏览。本页面不抓取、不上传、不修改任何文件。</p>
+  </header>
+
+  <section class="panel">
+    <h2>批次</h2>
+    {% if batches %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>批次 ID</th><th>状态</th><th>文件</th><th>冲突</th><th>转码成功</th><th>创建时间</th></tr>
+        </thead>
+        <tbody>
+        {% for batch in batches %}
+          <tr>
+            <td><a href="{{ url_for('batch_detail', batch_id=batch.batch_id) }}">{{ batch.batch_id }}</a></td>
+            <td>{{ batch.status }}</td>
+            <td class="num">{{ batch.file_count }}</td>
+            <td class="num">{{ batch.conflict_count }}</td>
+            <td class="num">{{ batch.transcoded_count }}</td>
+            <td>{{ batch.created_at }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">台账为空。请先运行 pipeline 命令生成批次。</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>只读边界</h2>
+    <p>复核台只查询 SQLite 台账，不提供上传、删除、修改、远程触发或编码重跑接口。</p>
+  </section>
+</main>
+</body>
+</html>

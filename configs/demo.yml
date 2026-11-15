@@ -1,0 +1,42 @@
+scan:
+  root: ../fixtures/responses
+  extensions:
+    - .html
+    - .htm
+    - .xml
+    - .txt
+    - .css
+  sidecar_suffix: .headers.json
+  sidecar_root: ../fixtures/sidecars
+
+output:
+  dir: ../out
+  manifest: manifest.json
+  reports_dir: reports
+  transcode_dir: transcoded
+  database: decodebench.sqlite3
+
+detection:
+  fallback_encoding: utf-8
+  candidate_encodings:
+    - utf-8
+    - gb18030
+    - big5
+    - utf-16-le
+    - utf-16-be
+    - windows-1252
+    - latin-1
+  trusted_http_headers: true
+  minimum_confidence: 0.55
+
+transcode:
+  rewrite_declarations: true
+  errors: strict
+
+mojibake:
+  question_run_threshold: 3
+  control_ratio_threshold: 0.01
+
+web:
+  host: 127.0.0.1
+  port: 5017

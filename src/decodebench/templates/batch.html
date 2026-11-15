@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>批次 {{ batch.batch_id }} · 采文解码台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main>
+  <nav><a href="{{ url_for('index') }}">← 批次列表</a></nav>
+  <header>
+    <p class="eyebrow">batch / {{ batch.status }}</p>
+    <h1>批次 {{ batch.batch_id }}</h1>
+    <p class="lede">扫描根：{{ batch.input_root }}</p>
+  </header>
+
+  <section class="stats">
+    <div><strong>{{ batch.file_count }}</strong><span>文件</span></div>
+    <div><strong>{{ batch.conflict_count }}</strong><span>冲突</span></div>
+    <div><strong>{{ batch.transcoded_count }}</strong><span>转码成功</span></div>
+    <div><strong>{{ batch.run_count }}</strong><span>运行次数</span></div>
+  </section>
+
+  <section class="panel">
+    <h2>文件决策</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>相对路径</th><th>最终编码</th><th>置信度</th><th>方法</th><th>风险</th><th>警告</th><th>转码</th></tr>
+        </thead>
+        <tbody>
+        {% for item in files %}
+          <tr>
+            <td><a href="{{ url_for('file_detail', batch_id=batch.batch_id, rel_path=item.rel_path) }}">{{ item.rel_path }}</a></td>
+            <td>{{ item.final_encoding }}</td>
+            <td class="num">{{ "%.6f"|format(item.confidence) }}</td>
+            <td>{{ item.method }}</td>
+            <td>{{ item.risk_level }}</td>
+            <td class="num">{{ item.warning_count }}</td>
+            <td>{{ "成功" if item.transcode_success else "失败" }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="empty">本批次没有文件。</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>批次元数据</h2>
+    <dl class="facts">
+      <dt>规则版本</dt><dd>{{ batch.rule_version }}</dd>
+      <dt>配置指纹</dt><dd class="mono">{{ batch.config_fingerprint }}</dd>
+      <dt>创建时间</dt><dd>{{ batch.created_at }}</dd>
+      <dt>更新时间</dt><dd>{{ batch.updated_at }}</dd>
+    </dl>
+  </section>
+</main>
+</body>
+</html>
