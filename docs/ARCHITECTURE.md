@@ -16,11 +16,12 @@
 | `detectors.py` | BOM 表、编码别名、严格解码、字符比例、UTF-16 形态识别 |
 | `scorer.py` | 对严格解码结果做确定性评分与排序，选择统计获胜者 |
 | `resolver.py` | 按优先级裁决、生成冲突错误码、置信度与警告 |
-| `transcoder.py` | 严格/替换解码、BOM 去除、声明重写、原子写入 UTF-8 |
+| `transcoder.py` | 严格/替换解码、BOM 去除、声明重写、原子写入 UTF-8（支持候选目录参数） |
+| `archive.py` | 候选批次目录、状态机 state.json、指纹驱动的候选恢复/清理、固定顺序正式发布与崩溃前滚 |
 | `mojibake.py` | 替换字符、典型 mojibake、控制字符、连续问号、代理项诊断 |
-| `manifest.py` | 构建稳定字段顺序的 `manifest.json` 与汇总 |
-| `ledger_schema.py` | SQLite 表结构 SQL |
-| `ledger.py` | 批次/文件/证据/决策/警告的幂等写入 |
+| `manifest.py` | 构建稳定字段顺序的 `manifest.json`、汇总与发布契约块 |
+| `ledger_schema.py` | SQLite 表结构 SQL（含 `batch_publish` 发布状态与 `current_pointer` 当前指针） |
+| `ledger.py` | 批次/文件/证据/决策/警告的幂等写入、批次预约、发布状态与当前指针事务 |
 | `ledger_queries.py` | 只读查询，供复核台和测试使用 |
 | `reporting.py` | JSON/Markdown 报告与自包含 HTML 调度 |
 | `report_html.py` | 零外链、零脚本 HTML 渲染 |
@@ -37,16 +38,31 @@
 ```text
 YAML config
   → load_config()（路径解析 + 配置指纹）
+  → recover_published_state()（按 state.json/指针前滚上次未完成的发布）
   → scan()（源文件元数据 + sidecar）
   → collect_evidence()（字节与声明证据）
   → analyze_candidates()（标准库严格解码评分）
   → resolve()（优先级裁决 + 冲突 + 警告）
-  → transcode()（UTF-8 输出，不覆盖源）
+  → transcode(target_dir=批次候选 files/)（UTF-8 候选，不覆盖源、不进正式视图）
   → diagnose_bytes()（乱码风险，只诊断）
-  → build_manifest()（证据清单）
-  → record_batch()（SQLite 幂等台账）
-  → write_reports()（JSON/Markdown/HTML）
+  → build_manifest()（候选证据清单 + 发布契约）
+  → reserve_batch()/record_batch()（SQLite 单事务台账）
+  → write_reports(target_dir=批次候选 reports/)
+  → publish_batch()（固定顺序切换符号链接/manifest/指针/current.json/终态）
 ```
+
+### 3.1 候选与正式发布的分离
+
+转码、清单、台账、报告先在 `out/batches/<batch_id>/` 候选区内完成。正式 `transcoded/`、`reports/` 是指向当前批次目录的相对符号链接，`manifest.json` 与 `current.json` 经 `os.replace` 原子切换，SQLite 当前指针在单事务内切换。单文件 `os.replace`/`os.symlink` 只保证单对象原子，跨对象的整批一致性由批次状态机在重跑时前滚保证：
+
+1. `transcoded` 链接 → 本批 `files/`；
+2. `reports` 链接 → 本批 `reports/`；
+3. `manifest.json` → 本批清单；
+4. SQLite `current_pointer` → 本批；
+5. `current.json` 落盘；
+6. 批次终态写回 `state.json` 与 `batch_publish`。
+
+状态机：`building → manifest_ready → ledger_ready → reports_ready → committed → published`；合格文件发布存在隔离项时终态为 `quarantined`，整批发布存在失败文件时终态为 `rejected` 且不触碰正式视图。候选复用要求配置指纹、源摘要、裁决编码与候选文件实际 SHA-256 全部一致；指纹不符或属于其它批次的未发布候选目录在重跑时清理，防止新旧同名输出拼接。
 
 `--now` 固定了 manifest、数据库批次时间和报告的 `generated_at`。相同输入 + 相同配置 + 相同 `--now` 的清单与报告字节稳定。
 

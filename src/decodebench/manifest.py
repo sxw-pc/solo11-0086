@@ -122,8 +122,25 @@ def build_manifest(
     config: Config,
     now: str,
     files: list[dict[str, Any]],
+    *,
+    batch_id: str | None = None,
+    batch_key: str | None = None,
+    source_fingerprint: str | None = None,
+    published_files: list[str] | None = None,
+    quarantined_files: list[str] | None = None,
 ) -> dict[str, Any]:
     ordered = sorted(files, key=lambda item: str(item["rel_path"]))
+    publish: dict[str, Any] = {
+        "policy": config.publish_policy,
+        "published_files": sorted(published_files or []),
+        "quarantined_files": sorted(quarantined_files or []),
+    }
+    if batch_id is not None:
+        publish["batch_id"] = batch_id
+    if batch_key is not None:
+        publish["batch_key"] = batch_key
+    if source_fingerprint is not None:
+        publish["source_fingerprint"] = source_fingerprint
     return {
         "schema_version": "1.0",
         "project": "decodebench",
@@ -132,6 +149,7 @@ def build_manifest(
         "config_fingerprint": config.fingerprint,
         "scan_root": config.scan_root.as_posix(),
         "config_snapshot": config.raw,
+        "publish": publish,
         "summary": summarize(ordered),
         "files": ordered,
     }

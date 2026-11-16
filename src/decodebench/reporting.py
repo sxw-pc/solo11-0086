@@ -44,6 +44,7 @@ def build_report(
         "config_fingerprint": manifest["config_fingerprint"],
         "batch_id": ledger_summary["batch_id"],
         "scan_root": manifest["scan_root"],
+        "publish": manifest.get("publish", {}),
         "summary": manifest["summary"],
         "warning_distribution": manifest["summary"]["warning_distribution"],
         "files": files,
@@ -141,13 +142,15 @@ def write_reports(
     manifest: dict[str, Any],
     ledger_summary: dict[str, Any],
     now: str,
+    target_dir: Path | None = None,
 ) -> dict[str, Path]:
     report = build_report(manifest, ledger_summary, now)
-    config.reports_dir.mkdir(parents=True, exist_ok=True)
+    reports_root = config.reports_dir if target_dir is None else target_dir
+    reports_root.mkdir(parents=True, exist_ok=True)
     paths = {
-        "json": config.reports_dir / "report.json",
-        "markdown": config.reports_dir / "report.md",
-        "html": config.reports_dir / "report.html",
+        "json": reports_root / "report.json",
+        "markdown": reports_root / "report.md",
+        "html": reports_root / "report.html",
     }
     write_json(paths["json"], report)
     write_text(paths["markdown"], render_markdown(report))

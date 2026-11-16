@@ -6,17 +6,19 @@
 
 ```text
 out/
-  manifest.json
+  current.json                     # 当前批次指针（批次 ID、状态、发布/隔离文件、manifest 摘要）
+  manifest.json                    # 当前批次清单（原子切换）
   decodebench.sqlite3
-  reports/
-    report.json
-    report.md
-    report.html
-  transcoded/
-    <与扫描根相同的相对目录结构>
+  transcoded/ -> batches/<id>/files
+  reports/   -> batches/<id>/reports
+  batches/<batch_id>/
+    state.json                     # 批次发布状态机
+    manifest.json                  # 候选/已发布清单
+    transcode-results.json         # 每文件转码结果与输出摘要
+    files/、reports/               # 候选 UTF-8 输出与候选报告
 ```
 
-可通过 `output.dir`、`output.manifest`、`output.reports_dir`、`output.transcode_dir`、`output.database` 覆盖。输出目录不得位于扫描根目录内。
+可通过 `output.dir`、`output.manifest`、`output.reports_dir`、`output.transcode_dir`、`output.database` 覆盖。输出目录不得位于扫描根目录内。`transcoded/`、`reports/` 在首次发布时切换为指向批次目录的相对符号链接；历史实体目录自动改名为 `.legacy-*` 备份。
 
 ## 2. `manifest.json`
 
@@ -31,6 +33,7 @@ out/
 | `config_fingerprint` | string | 合并默认值后配置的 SHA-256 |
 | `scan_root` | string | POSIX 风格的扫描根绝对路径 |
 | `config_snapshot` | object | 合并默认值后的 YAML 配置快照 |
+| `publish` | object | 发布契约：`policy`（`all_or_nothing`/`qualified_only`）、`batch_id`、`batch_key`、`source_fingerprint`、`published_files`、`quarantined_files` |
 | `summary` | object | 批次汇总 |
 | `files` | array | 按 `rel_path` 升序的文件条目 |
 
@@ -154,6 +157,14 @@ out/
 ### warnings
 
 `id`、`file_id`、`code`、`severity`、`message`、`line_number`、`byte_offset`、`snippet`。按文件重建，不累积重复警告。
+
+### batch_publish
+
+每批次一行的发布状态机镜像（权威状态同时落盘在批次目录 `state.json`）：`batch_id`（外键）、`state`（`building`/`manifest_ready`/`ledger_ready`/`reports_ready`/`committed`/`published`/`quarantined`/`rejected`）、`policy`、`published_count`、`quarantined_count`、`published_files_json`、`quarantined_files_json`、`batch_key`、`config_fingerprint`、`source_fingerprint`、`updated_at`。
+
+### current_pointer
+
+单行表（`singleton = 1`）保存正式当前批次 `batch_id` 与 `updated_at`，与 `current.json` 和符号链接视图在同一发布顺序内切换。
 
 ## 5. 确定性约定
 

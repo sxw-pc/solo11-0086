@@ -77,26 +77,40 @@ make count
 - 输出、manifest、报告、转码目录与 SQLite 路径；
 - fallback 编码、候选编码、置信度阈值；
 - 转码错误策略 `strict`/`replace` 与声明重写开关；
+- 发布契约 `publish.policy`：`all_or_nothing`（整批发布，默认）或 `qualified_only`（合格文件发布）；
 - mojibake 阈值；
 - 复核台回环地址与端口。
 
 配置中的相对路径**相对于配置文件所在目录**解析。输出目录、报告目录和清单不得位于扫描源目录内，避免污染源证据。
 
+## 发布契约与批次归档
+
+转码产物先写入**候选批次目录** `out/batches/<batch_id>/`，清单、台账、报告在候选区内全部完成并核对后，才按固定发布顺序切换正式视图。运行在任何切点中断都不会让正式目录出现“新 UTF-8 文件 + 旧清单/台账”的混合状态；重跑依据保存的源/配置指纹与实际文件摘要恢复已验证候选或清理未发布候选，绝不把旧批次同名输出与本次候选拼接。
+
+- `all_or_nothing`：本批所有文件都完成可复核的解码与转码才切换当前批次；任一文件严格解码失败则整批拒绝（状态 `rejected`），正式视图保持旧批次，全部文件进入候选区隔离列表。
+- `qualified_only`：问题文件进入明确的隔离/失败列表（状态 `quarantined`），只把已验证输出连同同版本证据清单、台账切换为当前；失败文件不会产生 UTF-8 输出，也不会用历史同名输出冒充成功。
+
+批次状态机：`building → manifest_ready → ledger_ready → reports_ready → committed → published`（含隔离项时终态为 `quarantined`；整批失败终态为 `rejected`）。状态同时落盘在批次目录的 `state.json` 与 SQLite `batch_publish` 表。正式发布顺序为：① `transcoded` 符号链接 → 本批 `files/`；② `reports` 符号链接 → 本批 `reports/`；③ `manifest.json` 原子替换；④ SQLite `current_pointer` 事务切换；⑤ `current.json` 落盘；⑥ 批次终态写回。每一步本身原子，跨对象的整批一致性由重跑时的状态前滚保证。
+
 ## 输出目录
 
 ```text
 out/
-  manifest.json                  # 稳定字段顺序的证据清单
-  decodebench.sqlite3            # 批次/文件/证据/决策/警告台账
-  reports/
-    report.json
-    report.md
-    report.html                  # 自包含、零外链、零脚本
-  transcoded/
-    <保留相对目录结构的 UTF-8 输出>
+  current.json                   # 当前批次权威描述（批次 ID、发布/隔离文件、清单摘要）
+  manifest.json                  # 当前批次证据清单（原子切换，指向同一批次）
+  decodebench.sqlite3            # 批次/文件/证据/决策/警告/发布状态/当前指针台账
+  transcoded/ -> batches/<id>/files      # 相对符号链接：当前批次的正式 UTF-8 输出
+  reports/   -> batches/<id>/reports     # 相对符号链接：当前批次报告
+  batches/
+    <batch_id>/
+      state.json                 # 可复核的批次发布状态机
+      manifest.json              # 候选/已发布清单
+      transcode-results.json     # 每文件转码结果与输出摘要（候选复用依据）
+      files/                     # 候选 UTF-8 文件（保留相对目录结构）
+      reports/                   # 候选 JSON/Markdown/HTML 报告
 ```
 
-源文件只读。转码输出独立写入 `output.transcode_dir`，每个输出记录源 SHA-256、输出 SHA-256、使用编码、错误策略和替换字符数量。HTML/XML 可把 charset 声明改写为 `utf-8`，重写会记录原文、新值与位置。
+源文件只读。转码输出独立写入候选批次目录，发布后经符号链接成为正式视图；每个输出记录源 SHA-256、输出 SHA-256、使用编码、错误策略和替换字符数量。HTML/XML 可把 charset 声明改写为 `utf-8`，重写会记录原文、新值与位置。首次发布若发现历史实体格式的 `transcoded/`、`reports/` 目录，会自动改名为 `.legacy-*` 备份再切换为符号链接。
 
 ## 检测顺序
 

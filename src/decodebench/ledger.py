@@ -272,3 +272,171 @@ def record_batch(config: Config, manifest: dict[str, Any], now: str) -> dict[str
         return _ledger_summary(connection, batch_id)
     finally:
         connection.close()
+
+
+def reserve_batch(
+    config: Config,
+    batch_id: str,
+    batch_key: str,
+    now: str,
+    file_count: int,
+) -> None:
+    """在清单完成时先登记一个 building 批次行，满足发布状态外键。
+
+    随后的 :func:`record_batch` 用同一 batch_key 幂等补齐文件并更新计数。
+    """
+    initialize(config.db_path)
+    connection = _connect(config.db_path)
+    try:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO batches (
+                    batch_id, batch_key, input_root, rule_version, config_fingerprint,
+                    created_at, updated_at, run_count, status, file_count,
+                    conflict_count, transcoded_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'building', ?, 0, 0)
+                ON CONFLICT(batch_key) DO NOTHING
+                """,
+                (
+                    batch_id,
+                    batch_key,
+                    config.scan_root.as_posix(),
+                    RULE_VERSION,
+                    config.fingerprint,
+                    now,
+                    now,
+                    file_count,
+                ),
+            )
+    finally:
+        connection.close()
+
+
+def record_publish_state(
+    config: Config,
+    batch_id: str,
+    state: str,
+    policy: str,
+    published_rel_paths: list[str],
+    quarantined_rel_paths: list[str],
+    batch_key: str,
+    source_fingerprint: str,
+    now: str,
+) -> bool:
+    """在单个 SQLite 事务内写入/更新批次发布状态。
+
+    事务只保护数据库内的状态；文件视图与 state.json/current.json 的切换由
+    归档层按固定发布顺序配合本状态完成崩溃恢复。批次行尚未登记（最早的
+    building 阶段）时返回 False，调用方依赖 state.json 文件状态，待
+    :func:`reserve_batch` 后再镜像到数据库。
+    """
+    initialize(config.db_path)
+    connection = _connect(config.db_path)
+    try:
+        with connection:
+            exists = connection.execute(
+                "SELECT 1 FROM batches WHERE batch_id = ?", (batch_id,)
+            ).fetchone()
+            if exists is None:
+                return False
+            connection.execute(
+                """
+                INSERT INTO batch_publish (
+                    batch_id, state, policy, published_count, quarantined_count,
+                    published_files_json, quarantined_files_json, batch_key,
+                    config_fingerprint, source_fingerprint, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(batch_id) DO UPDATE SET
+                    state = excluded.state,
+                    policy = excluded.policy,
+                    published_count = excluded.published_count,
+                    quarantined_count = excluded.quarantined_count,
+                    published_files_json = excluded.published_files_json,
+                    quarantined_files_json = excluded.quarantined_files_json,
+                    batch_key = excluded.batch_key,
+                    config_fingerprint = excluded.config_fingerprint,
+                    source_fingerprint = excluded.source_fingerprint,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    batch_id,
+                    state,
+                    policy,
+                    len(published_rel_paths),
+                    len(quarantined_rel_paths),
+                    json.dumps(published_rel_paths, ensure_ascii=False),
+                    json.dumps(quarantined_rel_paths, ensure_ascii=False),
+                    batch_key,
+                    config.fingerprint,
+                    source_fingerprint,
+                    now,
+                ),
+            )
+        return True
+    finally:
+        connection.close()
+
+
+def set_current_pointer(config: Config, batch_id: str, now: str) -> None:
+    """在单个事务内把当前批次指针切换为 ``batch_id``。"""
+    initialize(config.db_path)
+    connection = _connect(config.db_path)
+    try:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO current_pointer (singleton, batch_id, updated_at)
+                VALUES (1, ?, ?)
+                ON CONFLICT(singleton) DO UPDATE SET
+                    batch_id = excluded.batch_id,
+                    updated_at = excluded.updated_at
+                """,
+                (batch_id, now),
+            )
+    finally:
+        connection.close()
+
+
+def _has_table(connection: sqlite3.Connection, name: str) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+    ).fetchone()
+    return row is not None
+
+
+def get_publish_state(config: Config, batch_id: str) -> dict[str, Any] | None:
+    """读取批次发布状态；数据库或行不存在时返回 None。"""
+    if not config.db_path.is_file():
+        return None
+    connection = _connect(config.db_path)
+    try:
+        if not _has_table(connection, "batch_publish"):
+            return None
+        row = connection.execute(
+            "SELECT * FROM batch_publish WHERE batch_id = ?", (batch_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        data = dict(row)
+        data["published_files"] = json.loads(data.pop("published_files_json"))
+        data["quarantined_files"] = json.loads(data.pop("quarantined_files_json"))
+        return data
+    finally:
+        connection.close()
+
+
+def get_current_pointer(config: Config) -> str | None:
+    """读取数据库内当前批次指针；无指针或旧版库未迁移时返回 None。"""
+    if not config.db_path.is_file():
+        return None
+    connection = _connect(config.db_path)
+    try:
+        if not _has_table(connection, "current_pointer"):
+            return None
+        row = connection.execute(
+            "SELECT batch_id FROM current_pointer WHERE singleton = 1"
+        ).fetchone()
+        return None if row is None else str(row["batch_id"])
+    finally:
+        connection.close()

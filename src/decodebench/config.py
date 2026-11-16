@@ -46,6 +46,7 @@ DEFAULTS: dict[str, Any] = {
         "minimum_confidence": 0.55,
     },
     "transcode": {"rewrite_declarations": True, "errors": "strict"},
+    "publish": {"policy": "all_or_nothing"},
     "mojibake": {"question_run_threshold": 3, "control_ratio_threshold": 0.01},
     "web": {"host": "127.0.0.1", "port": 5017},
 }
@@ -69,6 +70,7 @@ class Config:
     minimum_confidence: float
     rewrite_declarations: bool
     transcode_errors: str
+    publish_policy: str
     question_run_threshold: int
     control_ratio_threshold: float
     web_host: str
@@ -107,6 +109,18 @@ def _resolve(base: Path, value: str) -> Path:
     return candidate.resolve()
 
 
+def _resolve_output(base: Path, value: str) -> Path:
+    """输出路径取绝对路径但不跟随符号链接。
+
+    正式 transcode/reports 视图本身是指向批次目录的相对符号链接；若用
+    ``resolve()`` 会穿透链接，使重跑配置落到上一批目录内部形成链接环。
+    """
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = base / candidate
+    return candidate.absolute()
+
+
 def _is_loopback(host: str) -> bool:
     if host == "localhost":
         return True
@@ -131,6 +145,7 @@ def load_config(path: str | Path) -> Config:
     output = _require(raw, "output", dict, "配置")
     detection = _require(raw, "detection", dict, "配置")
     transcode = _require(raw, "transcode", dict, "配置")
+    publish = _require(raw, "publish", dict, "配置")
     mojibake = _require(raw, "mojibake", dict, "配置")
     web = _require(raw, "web", dict, "配置")
 
@@ -150,15 +165,15 @@ def load_config(path: str | Path) -> Config:
         normalized_extensions.append(item.lower())
 
     out_value = _require(output, "dir", str, "output")
-    out_dir = _resolve(base, out_value)
+    out_dir = _resolve_output(base, out_value)
     manifest_name = _require(output, "manifest", str, "output")
     reports_name = _require(output, "reports_dir", str, "output")
     transcode_name = _require(output, "transcode_dir", str, "output")
     database_name = _require(output, "database", str, "output")
-    manifest_path = _resolve(base, str(Path(out_value) / manifest_name))
-    reports_dir = _resolve(base, str(Path(out_value) / reports_name))
-    transcode_dir = _resolve(base, str(Path(out_value) / transcode_name))
-    db_path = _resolve(base, str(Path(out_value) / database_name))
+    manifest_path = _resolve_output(base, str(Path(out_value) / manifest_name))
+    reports_dir = _resolve_output(base, str(Path(out_value) / reports_name))
+    transcode_dir = _resolve_output(base, str(Path(out_value) / transcode_name))
+    db_path = _resolve_output(base, str(Path(out_value) / database_name))
     if out_dir == scan_root or scan_root in out_dir.parents:
         raise ConfigError("输出目录不得位于扫描源目录内，以保护源文件")
     if transcode_dir == scan_root or scan_root in transcode_dir.parents:
@@ -195,6 +210,11 @@ def load_config(path: str | Path) -> Config:
     rewrite = transcode.get("rewrite_declarations")
     if not isinstance(rewrite, bool):
         raise ConfigError("transcode.rewrite_declarations 必须是布尔值")
+    policy = publish.get("policy")
+    if policy not in {"all_or_nothing", "qualified_only"}:
+        raise ConfigError(
+            "publish.policy 只能是 all_or_nothing（整批发布）或 qualified_only（合格文件发布）"
+        )
     qr_threshold = mojibake.get("question_run_threshold")
     cr_threshold = mojibake.get("control_ratio_threshold")
     if not isinstance(qr_threshold, int) or qr_threshold < 2:
@@ -236,6 +256,7 @@ def load_config(path: str | Path) -> Config:
         minimum_confidence=float(minimum),
         rewrite_declarations=rewrite,
         transcode_errors=errors,
+        publish_policy=str(policy),
         question_run_threshold=qr_threshold,
         control_ratio_threshold=float(cr_threshold),
         web_host=host,

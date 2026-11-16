@@ -70,5 +70,28 @@ CREATE TABLE IF NOT EXISTS warnings (
 CREATE INDEX IF NOT EXISTS idx_files_batch ON files(batch_id, rel_path);
 CREATE INDEX IF NOT EXISTS idx_evidence_file ON evidence(file_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_warnings_file ON warnings(file_id, code);
+
+-- 发布状态机：每个批次的归档/发布/隔离裁决与可复核恢复信息。
+CREATE TABLE IF NOT EXISTS batch_publish (
+    batch_id TEXT PRIMARY KEY REFERENCES batches(batch_id),
+    state TEXT NOT NULL,
+    policy TEXT NOT NULL,
+    published_count INTEGER NOT NULL,
+    quarantined_count INTEGER NOT NULL,
+    published_files_json TEXT NOT NULL,
+    quarantined_files_json TEXT NOT NULL,
+    batch_key TEXT NOT NULL,
+    config_fingerprint TEXT NOT NULL,
+    source_fingerprint TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_publish_state ON batch_publish(state);
+
+-- 正式“当前批次”指针，与 current.json、符号链接视图在同一发布顺序内切换。
+CREATE TABLE IF NOT EXISTS current_pointer (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    batch_id TEXT NOT NULL REFERENCES batches(batch_id),
+    updated_at TEXT NOT NULL
+);
 """
 

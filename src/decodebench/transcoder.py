@@ -87,8 +87,19 @@ def _atomic_write(path: Path, data: bytes) -> None:
     os.replace(temporary, path)
 
 
-def transcode(source: SourceFile, raw: bytes, encoding: str, config: Config) -> TranscodeResult:
-    """按裁决编码严格或替换解码，只写入独立转码目录。"""
+def transcode(
+    source: SourceFile,
+    raw: bytes,
+    encoding: str,
+    config: Config,
+    target_dir: Path | None = None,
+) -> TranscodeResult:
+    """按裁决编码严格或替换解码，写入候选/正式转码目录。
+
+    ``target_dir`` 缺省为配置中的正式 ``transcode_dir``，保持单文件调用的
+    既有行为；流水线归档时传入批次候选目录，使候选产物不直接进入正式视图。
+    源目录始终只读，本函数不修改任何源文件。
+    """
     canonical = canonical_encoding(encoding)
     errors = config.transcode_errors
     try:
@@ -119,9 +130,10 @@ def transcode(source: SourceFile, raw: bytes, encoding: str, config: Config) -> 
     if config.rewrite_declarations:
         text, rewrites = rewrite_declarations(text, Path(source.rel_path).suffix)
 
-    output = config.transcode_dir / source.rel_path
+    output_root = target_dir if target_dir is not None else config.transcode_dir
+    output = output_root / source.rel_path
     try:
-        output.resolve().relative_to(config.transcode_dir)
+        output.resolve().relative_to(output_root.resolve())
     except ValueError as exc:
         raise ValueError(f"转码输出路径越界: {source.rel_path}") from exc
     payload = text.encode("utf-8")

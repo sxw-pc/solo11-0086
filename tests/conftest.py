@@ -33,6 +33,7 @@ def build_config(
     candidates: list[str] | None = None,
     transcode_errors: str = "strict",
     rewrite: bool = True,
+    publish_policy: str = "all_or_nothing",
     host: str = "127.0.0.1",
     port: int = 5017,
 ) -> Config:
@@ -72,6 +73,7 @@ def build_config(
             "minimum_confidence": 0.55,
         },
         "transcode": {"rewrite_declarations": rewrite, "errors": transcode_errors},
+        "publish": {"policy": publish_policy},
         "mojibake": {"question_run_threshold": 3, "control_ratio_threshold": 0.01},
         "web": {"host": host, "port": port},
     }
