@@ -14,6 +14,8 @@ output:
   manifest: manifest.json
   reports_dir: reports
   transcode_dir: transcoded
+  repair_dir: repair
+  repair_candidates: repair_candidates.json
   database: decodebench.sqlite3
 
 detection:

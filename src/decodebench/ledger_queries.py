@@ -122,3 +122,46 @@ def get_file_detail(
         return file_data
     finally:
         connection.close()
+
+
+def list_repair_approvals(db_path: Path) -> list[dict[str, Any]]:
+    if not db_path.is_file():
+        return []
+    connection = _connect_readonly(db_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT approval_id, approval_sha256, approver, approved_at, applied_at,
+                   item_count, approved_count, kept_count, created_at, updated_at
+            FROM repair_approvals
+            ORDER BY created_at DESC, approval_id ASC
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        connection.close()
+
+
+def list_repair_items(db_path: Path, approval_id: str) -> list[dict[str, Any]]:
+    if not db_path.is_file():
+        return []
+    connection = _connect_readonly(db_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT approval_id, rel_path, candidate_id, source_sha256, encoding,
+                   disposition, transcode_output_sha256, repair_sha256,
+                   target_fragment_sha256, created_at
+            FROM repair_items
+            WHERE approval_id = ?
+            ORDER BY rel_path ASC, candidate_id ASC
+            """,
+            (approval_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        connection.close()

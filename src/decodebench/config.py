@@ -29,6 +29,8 @@ DEFAULTS: dict[str, Any] = {
         "manifest": "manifest.json",
         "reports_dir": "reports",
         "transcode_dir": "transcoded",
+        "repair_dir": "repair",
+        "repair_candidates": "repair_candidates.json",
         "database": "decodebench.sqlite3",
     },
     "detection": {
@@ -62,6 +64,8 @@ class Config:
     manifest_path: Path
     reports_dir: Path
     transcode_dir: Path
+    repair_dir: Path
+    repair_candidates_path: Path
     db_path: Path
     fallback_encoding: str
     candidate_encodings: tuple[str, ...]
@@ -80,6 +84,7 @@ class Config:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self.transcode_dir.mkdir(parents=True, exist_ok=True)
+        self.repair_dir.mkdir(parents=True, exist_ok=True)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -154,17 +159,27 @@ def load_config(path: str | Path) -> Config:
     manifest_name = _require(output, "manifest", str, "output")
     reports_name = _require(output, "reports_dir", str, "output")
     transcode_name = _require(output, "transcode_dir", str, "output")
+    repair_name = _require(output, "repair_dir", str, "output")
+    repair_candidates_name = _require(output, "repair_candidates", str, "output")
     database_name = _require(output, "database", str, "output")
     manifest_path = _resolve(base, str(Path(out_value) / manifest_name))
     reports_dir = _resolve(base, str(Path(out_value) / reports_name))
     transcode_dir = _resolve(base, str(Path(out_value) / transcode_name))
+    repair_dir = _resolve(base, str(Path(out_value) / repair_name))
+    repair_candidates_path = _resolve(
+        base, str(Path(out_value) / repair_candidates_name)
+    )
     db_path = _resolve(base, str(Path(out_value) / database_name))
     if out_dir == scan_root or scan_root in out_dir.parents:
         raise ConfigError("输出目录不得位于扫描源目录内，以保护源文件")
     if transcode_dir == scan_root or scan_root in transcode_dir.parents:
         raise ConfigError("转码目录不得位于扫描源目录内，以保护源文件")
+    if repair_dir == scan_root or scan_root in repair_dir.parents:
+        raise ConfigError("修复副本目录不得位于扫描源目录内，以保护源文件")
     if manifest_path == scan_root or reports_dir == scan_root:
         raise ConfigError("报告与清单不得写入扫描源目录")
+    if repair_candidates_path == scan_root:
+        raise ConfigError("修复候选清单不得写入扫描源目录")
 
     sidecar_root_value = scan.get("sidecar_root")
     sidecar_root: Path | None = None
@@ -229,6 +244,8 @@ def load_config(path: str | Path) -> Config:
         manifest_path=manifest_path,
         reports_dir=reports_dir,
         transcode_dir=transcode_dir,
+        repair_dir=repair_dir,
+        repair_candidates_path=repair_candidates_path,
         db_path=db_path,
         fallback_encoding=fallback,
         candidate_encodings=tuple(dict.fromkeys(candidates)),

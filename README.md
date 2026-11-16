@@ -68,6 +68,24 @@ make count
 
 `--now` 会归一化为 UTC，并写入 manifest、SQLite 批次时间和报告。固定该值后，同一输入和配置生成的 manifest 与 JSON/Markdown/HTML 报告字节稳定。
 
+## 离线人工乱码修复
+
+`pipeline` 只诊断不修复。需要修复时，走一条须人工明确批准的离线分支，源文件与 `transcoded/` 转码产物始终不变：
+
+```bash
+# 1. 重建严格可逆修复候选，生成默认全部保留原文的批准模板
+python -m decodebench repair-candidates --config configs/demo.yml
+
+# 2. 复核者编辑模板：把确认是误码的条目改为 approve_candidate，
+#    填写 approver / approved_at；真实字面量保持 keep_original
+
+# 3. 校验批准并只在独立 repair/ 目录生成修复副本，同时写修复台账
+python -m decodebench repair-apply --config configs/demo.yml \
+    --approval out/repair_approval.template.json --now 2024-01-02T00:00:00Z
+```
+
+候选只有在“原片段按错误字符集严格重编码 → 按目标字符集严格解码 → 逆向逐字符还原”全部成立时才给出；含 U+FFFD、不可逆字符或相互重叠的候选标记为 blocked，不能批准。批准文件绑定源 SHA-256、裁决编码、精确片段位置、候选路径与目标片段摘要，源文件改变或位置漂移时旧批准失效；重复执行同一批准幂等。
+
 ## 配置
 
 `configs/demo.yml` 指定：

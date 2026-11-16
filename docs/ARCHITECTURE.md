@@ -17,7 +17,8 @@
 | `scorer.py` | 对严格解码结果做确定性评分与排序，选择统计获胜者 |
 | `resolver.py` | 按优先级裁决、生成冲突错误码、置信度与警告 |
 | `transcoder.py` | 严格/替换解码、BOM 去除、声明重写、原子写入 UTF-8 |
-| `mojibake.py` | 替换字符、典型 mojibake、控制字符、连续问号、代理项诊断 |
+| `mojibake.py` | 替换字符、典型 mojibake、控制字符、连续问号、代理项诊断；修复候选入口 |
+| `repair.py` | 严格可逆修复候选、人工批准文件校验、独立修复副本与批准台账 |
 | `manifest.py` | 构建稳定字段顺序的 `manifest.json` 与汇总 |
 | `ledger_schema.py` | SQLite 表结构 SQL |
 | `ledger.py` | 批次/文件/证据/决策/警告的幂等写入 |
@@ -43,10 +44,13 @@ YAML config
   → resolve()（优先级裁决 + 冲突 + 警告）
   → transcode()（UTF-8 输出，不覆盖源）
   → diagnose_bytes()（乱码风险，只诊断）
+  → build_repair_candidates()（严格可逆候选证据，不自动修复）
   → build_manifest()（证据清单）
   → record_batch()（SQLite 幂等台账）
   → write_reports()（JSON/Markdown/HTML）
 ```
+
+离线人工修复分支独立于主流水线：`repair-candidates` 重放扫描/裁决/转码文本步骤重建候选并生成批准模板；复核者填写批准文件后由 `repair-apply` 校验并只写 `repair/` 修复副本与修复台账。
 
 `--now` 固定了 manifest、数据库批次时间和报告的 `generated_at`。相同输入 + 相同配置 + 相同 `--now` 的清单与报告字节稳定。
 
@@ -122,3 +126,14 @@ YAML config
 - JSON 使用 `ensure_ascii=False`、固定缩进和固定键顺序。
 - 报告不读取当前系统时间，只使用传入的 `now`。
 - 自包含 HTML 不引用 CDN、远程字体、脚本或图片。
+
+## 9. 离线可逆乱码修复候选
+
+诊断只报告证据，修复则是一条独立的、须人工明确批准的离线流程，`pipeline` 本身永远不会自动改写正文：
+
+1. **候选生成（`repair.py` / `mojibake.build_repair_candidates`）**：对转码后的 UTF-8 文本，以典型 mojibake 序列为枚举入口（命中只用于缩小窗口，不证明正确），对每个非 ASCII 连续段的子窗口逐一尝试声明清楚的严格路径——原片段按错误字符集 `strict` 重新编码，再按目标字符集 `strict` 解码，并要求逆向还原逐字符等于原片段。任一步出现 U+FFFD、不可编码字符或解码失败的窗口记入 `ineligible_spans`，不进入候选。
+2. **同形片段分别列出**：程序无法仅凭字符区分真实字面量与误码形成的同形片段（例如真实字面 `Ã©` 与误码 `Ã©`），因此每一处都按字符偏移与 UTF-8 字节偏移分别给出候选，未经批准全部保留原文。
+3. **阻塞规则**：含 U+FFFD、不可逆字符的窗口没有候选；位置相互重叠的候选全部标记 `blocked` 并列出 `overlap_with`，不能批准发布。
+4. **人工批准文件**：`repair-candidates` 子命令写出 `repair_candidates.json` 与默认全部 `keep_original` 的批准模板。批准文件绑定源 SHA-256、当前裁决编码、精确片段位置、候选路径与目标片段摘要（`bindings` + `target_fragment_sha256`），并记录 `approver` 身份。
+5. **批准执行（`repair-apply`）**：全部条目先校验，任何一条不合法（源摘要变化、裁决编码变化、候选不存在即位置漂移、目标摘要不匹配、候选 blocked、缺少批准身份）都整体拒绝且不产生任何写入。通过后只在独立 `repair/` 目录生成修复副本：`approve_candidate` 仅替换获批片段，未批准的同形片段保持原样；`keep_original` 归档与转码产物逐字节相同的副本并记录风险决策。源目录与 `transcoded/` 及其摘要始终不变。
+6. **可追溯与幂等**：候选证据在清单与 `repair_candidates.json` 中落盘；执行结果写 `repair/applied_repairs.json` 与 SQLite `repair_approvals` / `repair_items` 表，记录批准身份、批准文件摘要、源/转码/修复三份摘要。台账以批准文件 SHA-256 为身份，重复执行同一批准只更新时间戳，不新增行、不改变修复副本摘要。

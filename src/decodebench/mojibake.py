@@ -1,4 +1,10 @@
-"""乱码风险诊断：只报告证据，不自动二次转码。"""
+"""乱码风险诊断：只报告证据，不自动二次转码。
+
+本模块的 analyze/diagnose_bytes 只定位证据。可逆修复候选由
+build_repair_candidates 单独提供：候选必须通过严格的
+“按错误字符集重新编码 → 按目标字符集解码”路径且逐字符可逆，
+典型字串命中本身不等于可修复；未经人工批准一律保留原文。
+"""
 
 from __future__ import annotations
 
@@ -7,28 +13,8 @@ import re
 from .config import Config
 from .detectors import canonical_encoding
 from .models import MojibakeReport, WarningItem
+from .repair import FileRepairFindings, TYPICAL_MOJIBAKE, build_repair_findings
 
-TYPICAL_MOJIBAKE = (
-    "Ã©",
-    "Ã¨",
-    "Ã¤",
-    "Ã¶",
-    "Ã¼",
-    "ÃŸ",
-    "Â©",
-    "Â®",
-    "â€™",
-    "â€œ",
-    "â€\x9d",
-    "â€“",
-    "â€”",
-    "ï»¿",
-    "æ˜¯",
-    "ä¸€",
-    "çš„",
-    "è¿™",
-    "ã€‚",
-)
 CONTROL_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 SURROGATE_TRACE = re.compile(r"\\u[dD][89a-fA-F][0-9a-fA-F]{2}|[\ud800-\udfff]")
 SEVERITY_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
@@ -168,3 +154,27 @@ def to_warning_items(report: MojibakeReport) -> list[WarningItem]:
             )
         )
     return warnings
+
+
+def build_repair_candidates(
+    rel_path: str,
+    source_sha256: str,
+    encoding: str,
+    transcoded_text: str,
+    output_rel_path: str | None,
+    output_sha256: str | None,
+) -> FileRepairFindings:
+    """基于转码后的 UTF-8 文本生成可逆修复候选证据。
+
+    仅枚举证据，不修改任何文件。含 U+FFFD、不可逆字符或相互重叠的候选
+    会被标记为 blocked / ineligible，等待人工在独立批准文件中裁决。
+    真实字面量与误码同形片段无法仅凭字符区分，因此按偏移分别列出。
+    """
+    return build_repair_findings(
+        rel_path=rel_path,
+        source_sha256=source_sha256,
+        encoding=encoding,
+        text=transcoded_text,
+        transcode_output_rel_path=output_rel_path,
+        transcode_output_sha256=output_sha256,
+    )

@@ -272,3 +272,137 @@ def record_batch(config: Config, manifest: dict[str, Any], now: str) -> dict[str
         return _ledger_summary(connection, batch_id)
     finally:
         connection.close()
+
+
+def record_repairs(
+    config: Config,
+    approval: dict[str, Any],
+    approval_sha256: str,
+    applied: list[dict[str, Any]],
+    now: str,
+) -> dict[str, Any]:
+    """幂等记录一次人工批准的修复执行。
+
+    以批准文件 SHA-256 作为身份；重复执行同一批准只更新时间戳与计数，
+    不新增 repair_approvals / repair_items 行。
+    """
+    initialize(config.db_path)
+    approval_id = approval_sha256[:20]
+    entries = approval["entries"]
+    approved_count = sum(
+        1 for entry in entries if entry["decision"] == "approve_candidate"
+    )
+    kept_count = len(entries) - approved_count
+    connection = _connect(config.db_path)
+    try:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO repair_approvals (
+                    approval_id, approval_sha256, approver, approved_at, applied_at,
+                    item_count, approved_count, kept_count, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(approval_sha256) DO UPDATE SET
+                    applied_at = excluded.applied_at,
+                    item_count = excluded.item_count,
+                    approved_count = excluded.approved_count,
+                    kept_count = excluded.kept_count,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    approval_id,
+                    approval_sha256,
+                    str(approval["approver"]),
+                    str(approval["approved_at"]),
+                    now,
+                    len(entries),
+                    approved_count,
+                    kept_count,
+                    now,
+                    now,
+                ),
+            )
+            connection.execute(
+                "DELETE FROM repair_items WHERE approval_id = ?", (approval_id,)
+            )
+            for row in applied:
+                for candidate_id in row["approved_candidate_ids"]:
+                    connection.execute(
+                        """
+                        INSERT INTO repair_items (
+                            approval_id, rel_path, candidate_id, source_sha256,
+                            encoding, disposition, transcode_output_sha256,
+                            repair_sha256, target_fragment_sha256,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            approval_id,
+                            row["rel_path"],
+                            candidate_id,
+                            row["source_sha256"],
+                            _encoding_for(approval, row["rel_path"]),
+                            "approved_repair",
+                            row["transcode_output_sha256"],
+                            row["repair_sha256"],
+                            _target_digest(approval, row["rel_path"], candidate_id),
+                            now,
+                            now,
+                        ),
+                    )
+                for candidate_id in row["kept_candidate_ids"]:
+                    connection.execute(
+                        """
+                        INSERT INTO repair_items (
+                            approval_id, rel_path, candidate_id, source_sha256,
+                            encoding, disposition, transcode_output_sha256,
+                            repair_sha256, target_fragment_sha256,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            approval_id,
+                            row["rel_path"],
+                            candidate_id,
+                            row["source_sha256"],
+                            _encoding_for(approval, row["rel_path"]),
+                            "kept_original",
+                            row["transcode_output_sha256"],
+                            row["repair_sha256"],
+                            _target_digest(approval, row["rel_path"], candidate_id),
+                            now,
+                            now,
+                        ),
+                    )
+        totals = connection.execute(
+            "SELECT COUNT(*) AS n FROM repair_items WHERE approval_id = ?",
+            (approval_id,),
+        ).fetchone()["n"]
+        return {
+            "approval_id": approval_id,
+            "approval_sha256": approval_sha256,
+            "items_recorded": int(totals),
+            "approved_count": approved_count,
+            "kept_count": kept_count,
+        }
+    finally:
+        connection.close()
+
+
+def _encoding_for(approval: dict[str, Any], rel_path: str) -> str:
+    for binding in approval.get("bindings", []):
+        if binding.get("rel_path") == rel_path:
+            return str(binding.get("encoding", ""))
+    return ""
+
+
+def _target_digest(
+    approval: dict[str, Any], rel_path: str, candidate_id: str
+) -> str:
+    for entry in approval["entries"]:
+        if (
+            entry.get("rel_path") == rel_path
+            and entry.get("candidate_id") == candidate_id
+        ):
+            return str(entry.get("target_fragment_sha256", ""))
+    return ""

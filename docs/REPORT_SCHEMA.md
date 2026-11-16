@@ -102,7 +102,18 @@ out/
 
 `level` 为 `none`、`low`、`medium`、`high`。`findings` 每项包含 `code`、`severity`、`message`、`line`、`column`、`offset`、`snippet`。`recommendation` 只给建议，不包含自动修复动作。
 
-### 2.7 summary
+### 2.7 repair_candidates
+
+每个文件条目下的可逆修复候选证据（无候选时为 `null`）。候选仅为证据，不触发任何自动修复。
+
+- 顶层：`rel_path`、`source_sha256`、`encoding`、`transcode_output_rel_path`、`transcode_output_sha256`、`candidate_count`、`blocked_count`、`ineligible_count`。
+- `candidates` 每项包含 `candidate_id`、`position`（`start_char`/`end_char`/`start_byte`/`end_byte`/`line`/`column`，基于转码后 UTF-8 字符）、`fragment` 与 `fragment_sha256`、`repaired` 与 `repaired_sha256`、`route`（`route_id`、`target_encoding`、`wrong_encoding`、严格路径说明）、`alternative_routes`、`reversible`、`status`（`candidate`/`blocked`）、`blocked_reasons`、`overlap_with`、`snippet`。
+- `candidate_id` 由源 SHA-256、裁决编码、精确位置、路径与目标片段摘要派生；任一要素变化都会产生不同 ID。
+- `ineligible_spans` 记录未通过严格路径的窗口：`reason` 为 `irreversible_replacement`（含 U+FFFD）或 `irreversible_encoding`，附 `route_id` 与失败 `detail`。
+
+输出目录根部另有 `repair_candidates.json`，结构与各文件条目一致并带全批次 `summary`（`candidates_total`/`candidates_blocked`/`candidates_pending`）。人工批准文件与 `repair/applied_repairs.json` 使用同一 `schema_version`。
+
+### 2.8 summary
 
 包含 `files_total`、`conflict_files`、`transcode_success`、`transcode_failed`、`files_with_warnings`、`warnings_total`、`warning_distribution`、`method_distribution`、`risk_distribution`。
 
@@ -120,7 +131,8 @@ out/
 | `scan_root` | 扫描根 |
 | `summary` | manifest 汇总 |
 | `warning_distribution` | 警告分布 |
-| `files` | 每文件决策摘要，按路径升序 |
+| `repair_summary` | 修复候选计数（总数/阻塞/待决）与人工批准提示 |
+| `files` | 每文件决策摘要，按路径升序，含 `repair_candidate_count` 与 `repair_blocked_count` |
 | `ledger` | SQLite 台账摘要 |
 
 每文件摘要包含 `rel_path`、`encoding`、`confidence`、`method`、`conflict`、`error_codes`、`transcode_success`、`output_rel_path`、`output_sha256`、`risk_level`、`warning_count`、`warning_codes`。

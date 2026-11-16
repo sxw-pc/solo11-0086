@@ -87,13 +87,54 @@ def _atomic_write(path: Path, data: bytes) -> None:
     os.replace(temporary, path)
 
 
-def transcode(source: SourceFile, raw: bytes, encoding: str, config: Config) -> TranscodeResult:
-    """按裁决编码严格或替换解码，只写入独立转码目录。"""
+def decode_for_transcode(
+    raw: bytes, encoding: str, errors: str
+) -> tuple[str | None, str, str | None, bool]:
+    """纯解码步骤：返回 (文本, 规范编码, 错误信息, 是否去除 BOM)。
+
+    失败时文本为 None。与 transcode 共用同一严格/替换解码语义，
+    供修复候选在不触碰转码产物的情况下重建完全一致的文本。
+    """
     canonical = canonical_encoding(encoding)
-    errors = config.transcode_errors
     try:
         text = raw.decode(canonical, errors=errors)
     except (UnicodeError, LookupError, ValueError) as exc:
+        return None, canonical, f"{type(exc).__name__}: {exc}"[:300], False
+    bom_removed = False
+    if detect_bom(raw) is not None and text.startswith("﻿"):
+        text = text[1:]
+        bom_removed = True
+    return text, canonical, None, bom_removed
+
+
+def prepare_transcode_text(
+    raw: bytes,
+    encoding: str,
+    errors: str,
+    suffix: str,
+    do_rewrite_declarations: bool,
+) -> tuple[str | None, str, str | None, bool, list[dict[str, object]]]:
+    """解码并（按配置）重写声明，返回与落盘转码产物逐字符相同的文本。"""
+    text, canonical, error, bom_removed = decode_for_transcode(raw, encoding, errors)
+    if text is None:
+        return None, canonical, error, False, []
+    rewrites: list[dict[str, object]] = []
+    if do_rewrite_declarations:
+        text, rewrites = rewrite_declarations(text, suffix)
+    return text, canonical, None, bom_removed, rewrites
+
+
+def transcode(source: SourceFile, raw: bytes, encoding: str, config: Config) -> TranscodeResult:
+    """按裁决编码严格或替换解码，只写入独立转码目录。"""
+    errors = config.transcode_errors
+    text, canonical, error, bom_removed, rewrites = prepare_transcode_text(
+        raw,
+        encoding,
+        errors,
+        Path(source.rel_path).suffix,
+        config.rewrite_declarations,
+    )
+    if text is None:
         return TranscodeResult(
             success=False,
             encoding=canonical,
@@ -107,17 +148,8 @@ def transcode(source: SourceFile, raw: bytes, encoding: str, config: Config) -> 
             replacement_used=False,
             bom_removed=False,
             rewrites=[],
-            error=f"{type(exc).__name__}: {exc}"[:300],
+            error=error,
         )
-
-    bom_removed = False
-    if detect_bom(raw) is not None and text.startswith("﻿"):
-        text = text[1:]
-        bom_removed = True
-
-    rewrites: list[dict[str, object]] = []
-    if config.rewrite_declarations:
-        text, rewrites = rewrite_declarations(text, Path(source.rel_path).suffix)
 
     output = config.transcode_dir / source.rel_path
     try:

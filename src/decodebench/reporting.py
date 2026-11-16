@@ -19,6 +19,7 @@ def build_report(
     files: list[dict[str, Any]] = []
     for item in manifest["files"]:
         decision = item["decision"]
+        repair = item.get("repair_candidates") or {}
         files.append(
             {
                 "rel_path": item["rel_path"],
@@ -33,9 +34,13 @@ def build_report(
                 "risk_level": item["mojibake"]["level"],
                 "warning_count": item["warning_count"],
                 "warning_codes": sorted({str(row["code"]) for row in item["warnings"]}),
+                "repair_candidate_count": int(repair.get("candidate_count", 0) or 0),
+                "repair_blocked_count": int(repair.get("blocked_count", 0) or 0),
             }
         )
     files.sort(key=lambda row: str(row["rel_path"]))
+    repair_candidate_total = sum(int(row["repair_candidate_count"]) for row in files)
+    repair_blocked_total = sum(int(row["repair_blocked_count"]) for row in files)
     return {
         "schema_version": "1.0",
         "project": "decodebench",
@@ -46,6 +51,12 @@ def build_report(
         "scan_root": manifest["scan_root"],
         "summary": manifest["summary"],
         "warning_distribution": manifest["summary"]["warning_distribution"],
+        "repair_summary": {
+            "candidates_total": repair_candidate_total,
+            "candidates_blocked": repair_blocked_total,
+            "candidates_pending": repair_candidate_total - repair_blocked_total,
+            "notice": "修复候选仅为证据，须经离线人工批准后才会写入独立修复副本。",
+        },
         "files": files,
         "ledger": ledger_summary,
     }

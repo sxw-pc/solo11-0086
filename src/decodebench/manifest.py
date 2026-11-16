@@ -18,6 +18,7 @@ from .models import (
     TranscodeResult,
     WarningItem,
 )
+from .repair import FileRepairFindings
 from .util import write_json
 
 RISK_LEVELS = ("none", "low", "medium", "high")
@@ -46,6 +47,7 @@ def build_file_entry(
     transcode: TranscodeResult,
     mojibake: MojibakeReport,
     warnings: list[WarningItem],
+    repair: FileRepairFindings | None = None,
 ) -> dict[str, Any]:
     bom = detect_bom(raw)
     warning_rows = _warning_rows(warnings)
@@ -65,6 +67,7 @@ def build_file_entry(
         "decision": decision.to_dict(),
         "transcode": transcode.to_dict(),
         "mojibake": mojibake.to_dict(),
+        "repair_candidates": repair.to_dict() if repair is not None else None,
         "warnings": warning_rows,
         "warning_count": len(warning_rows),
     }

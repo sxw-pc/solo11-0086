@@ -70,5 +70,34 @@ CREATE TABLE IF NOT EXISTS warnings (
 CREATE INDEX IF NOT EXISTS idx_files_batch ON files(batch_id, rel_path);
 CREATE INDEX IF NOT EXISTS idx_evidence_file ON evidence(file_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_warnings_file ON warnings(file_id, code);
+CREATE TABLE IF NOT EXISTS repair_approvals (
+    approval_id TEXT PRIMARY KEY,
+    approval_sha256 TEXT NOT NULL UNIQUE,
+    approver TEXT NOT NULL,
+    approved_at TEXT NOT NULL,
+    applied_at TEXT NOT NULL,
+    item_count INTEGER NOT NULL,
+    approved_count INTEGER NOT NULL,
+    kept_count INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS repair_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    approval_id TEXT NOT NULL REFERENCES repair_approvals(approval_id),
+    rel_path TEXT NOT NULL,
+    candidate_id TEXT NOT NULL,
+    source_sha256 TEXT NOT NULL,
+    encoding TEXT NOT NULL,
+    disposition TEXT NOT NULL,
+    transcode_output_sha256 TEXT NOT NULL,
+    repair_sha256 TEXT NOT NULL,
+    target_fragment_sha256 TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(approval_id, rel_path, candidate_id)
+);
+CREATE INDEX IF NOT EXISTS idx_repair_items_approval ON repair_items(approval_id, rel_path);
+CREATE INDEX IF NOT EXISTS idx_repair_items_source ON repair_items(source_sha256);
 """
 
