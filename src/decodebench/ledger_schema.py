@@ -33,6 +33,12 @@ CREATE TABLE IF NOT EXISTS files (
     output_rel_path TEXT,
     output_sha256 TEXT,
     replacement_used INTEGER NOT NULL,
+    sidecar_sha256 TEXT,
+    entity_sha256 TEXT,
+    decoded_sha256 TEXT,
+    content_encoding_status TEXT NOT NULL DEFAULT 'none',
+    content_encoding_published INTEGER NOT NULL DEFAULT 1,
+    transcode_partial INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(idempotency_key, rel_path)
@@ -71,4 +77,14 @@ CREATE INDEX IF NOT EXISTS idx_files_batch ON files(batch_id, rel_path);
 CREATE INDEX IF NOT EXISTS idx_evidence_file ON evidence(file_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_warnings_file ON warnings(file_id, code);
 """
+
+# 旧台账升级：CREATE TABLE IF NOT EXISTS 不会补列，这里按需 ADD COLUMN。
+MIGRATIONS: tuple[tuple[str, str], ...] = (
+    ("files", "sidecar_sha256 TEXT"),
+    ("files", "entity_sha256 TEXT"),
+    ("files", "decoded_sha256 TEXT"),
+    ("files", "content_encoding_status TEXT NOT NULL DEFAULT 'none'"),
+    ("files", "content_encoding_published INTEGER NOT NULL DEFAULT 1"),
+    ("files", "transcode_partial INTEGER NOT NULL DEFAULT 0"),
+)
 

@@ -35,6 +35,7 @@ def build_config(
     rewrite: bool = True,
     host: str = "127.0.0.1",
     port: int = 5017,
+    content_encoding: dict[str, Any] | None = None,
 ) -> Config:
     config_dir = tmp_path / "configs"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -54,6 +55,7 @@ def build_config(
             "manifest": "manifest.json",
             "reports_dir": "reports",
             "transcode_dir": "transcoded",
+            "partial_dir": "partial",
             "database": "decodebench.sqlite3",
         },
         "detection": {
@@ -72,6 +74,15 @@ def build_config(
             "minimum_confidence": 0.55,
         },
         "transcode": {"rewrite_declarations": rewrite, "errors": transcode_errors},
+        "content_encoding": {
+            "enabled": True,
+            "failure_route": "strict",
+            "max_members": 64,
+            "entity_max_bytes": 8388608,
+            "inflate_max_bytes": 33554432,
+            "max_expansion_ratio": 200.0,
+            **(content_encoding or {}),
+        },
         "mojibake": {"question_run_threshold": 3, "control_ratio_threshold": 0.01},
         "web": {"host": host, "port": port},
     }

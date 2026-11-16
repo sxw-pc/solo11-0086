@@ -10,7 +10,7 @@ from typing import Any
 
 from . import RULE_VERSION
 from .config import Config
-from .ledger_schema import SCHEMA
+from .ledger_schema import MIGRATIONS, SCHEMA
 
 
 def idempotency_key(source_sha256: str, config_fingerprint: str) -> str:
@@ -29,6 +29,14 @@ def initialize(db_path: Path) -> None:
     connection = _connect(db_path)
     try:
         connection.executescript(SCHEMA)
+        existing = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(files)").fetchall()
+        }
+        for table, definition in MIGRATIONS:
+            column = definition.split()[0]
+            if table == "files" and column not in existing:
+                connection.execute(f"ALTER TABLE files ADD COLUMN {definition}")
         connection.commit()
     finally:
         connection.close()
@@ -93,6 +101,7 @@ def _upsert_file(
 ) -> int:
     decision = item["decision"]
     transcode = item["transcode"]
+    content = item.get("content_encoding") or {}
     source_key = idempotency_key(str(item["source_sha256"]), config.fingerprint)
     connection.execute(
         """
@@ -100,8 +109,10 @@ def _upsert_file(
             batch_id, idempotency_key, rel_path, source_size, source_sha256,
             source_mtime, final_encoding, confidence, method, conflict_count,
             warning_count, risk_level, transcode_success, output_rel_path,
-            output_sha256, replacement_used, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            output_sha256, replacement_used, sidecar_sha256, entity_sha256,
+            decoded_sha256, content_encoding_status, content_encoding_published,
+            transcode_partial, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(idempotency_key, rel_path) DO UPDATE SET
             batch_id = excluded.batch_id,
             source_size = excluded.source_size,
@@ -117,6 +128,12 @@ def _upsert_file(
             output_rel_path = excluded.output_rel_path,
             output_sha256 = excluded.output_sha256,
             replacement_used = excluded.replacement_used,
+            sidecar_sha256 = excluded.sidecar_sha256,
+            entity_sha256 = excluded.entity_sha256,
+            decoded_sha256 = excluded.decoded_sha256,
+            content_encoding_status = excluded.content_encoding_status,
+            content_encoding_published = excluded.content_encoding_published,
+            transcode_partial = excluded.transcode_partial,
             updated_at = excluded.updated_at
         """,
         (
@@ -136,6 +153,12 @@ def _upsert_file(
             transcode["output_rel_path"],
             transcode["output_sha256"],
             int(int(transcode["replacement_count"]) > 0),
+            (item.get("sidecar") or {}).get("sha256"),
+            item.get("entity_sha256"),
+            item.get("decoded_sha256"),
+            str(content.get("status", "none")),
+            int(bool(content.get("published_body", True))),
+            int(bool(transcode.get("partial"))),
             now,
             now,
         ),

@@ -17,7 +17,7 @@ fixture 由 `scripts/gen_fixtures.py` 生成，全部位于仓库内，不依赖
 | `plain_latin.txt` | Windows-1252 | 无 | `windows-1252` / `statistical` | `W_STATISTICAL_DECISION` |
 | `corrupted_replacement.html` | UTF-8 | HTML meta `utf-8` | `utf-8` / `meta_charset` | `W_REPLACEMENT_CHARS`、`W_MOJIBAKE_SEQUENCE`、`W_QUESTION_RUNS` |
 
-总体预期：10 个文件、1 个冲突文件、10 个转码成功、9 条警告、9 个 `none` 风险与 1 个 `high` 风险。
+总体预期：10 个文件、1 个冲突文件、10 个转码成功、9 条警告、9 个 `none` 风险与 1 个 `high` 风险。这些 fixture 都没有 `Content-Encoding` 声明，`content_encoding.status` 全部为 `none`。
 
 ## 2. 关键样本细节
 
@@ -74,7 +74,25 @@ sidecar 支持两种命名：`<filename>.<sidecar_suffix>` 和 `<stem>.<sidecar_
 
 sidecar 的 URL 只使用保留域名 `example.invalid`，不指向真实站点。
 
-## 4. 重新生成与回归
+## 4. gzip 解封装测试样本
+
+离线 gzip 场景不写入仓库 fixture 目录，而是在 `tests/gzip_support.py` 中用标准库
+`zlib` 现场构造，避免把压缩字节当成不易复核的二进制 fixture：
+
+| 测试构造 | 预期 `content_encoding.status` | 预期产物 |
+| --- | --- | --- |
+| 两个完整 member 串接 | `complete` | `transcoded/<path>`，`success=true` |
+| 第二 member CRC 错 + `strict` | `strict_failed` | 无正文、无产物 |
+| 第二 member CRC 错 + `verified_prefix` | `verified_prefix` | 仅 `partial/<path>.partial.utf8`，`success=false` |
+| 第二 member 截断 | `strict_failed` | 无正文、无产物 |
+| 解压后字节或膨胀比超限 | `strict_failed` / `E_GZIP_EXPANSION_LIMIT` | 无正文、无产物 |
+| sidecar 错宣 gzip，实体为明文 | `strict_failed` / `E_GZIP_NOT_GZIP` | 无正文，不猜字符集 |
+| 无 `Content-Encoding` 的旧样本 | `none` | 原字节流程与既有 fixture 完全一致 |
+
+失败 member 的字节不会出现在任何输出中；`transcode_partial` 单独计数，从不进入
+`transcode_success`。
+
+## 5. 重新生成与回归
 
 ```bash
 python scripts/gen_fixtures.py

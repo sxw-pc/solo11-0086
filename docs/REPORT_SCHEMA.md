@@ -14,9 +14,12 @@ out/
     report.html
   transcoded/
     <与扫描根相同的相对目录结构>
+  partial/
+    <rel_path>.partial.utf8      # 仅 verified_prefix 路线的已验证前缀
 ```
 
-可通过 `output.dir`、`output.manifest`、`output.reports_dir`、`output.transcode_dir`、`output.database` 覆盖。输出目录不得位于扫描根目录内。
+可通过 `output.dir`、`output.manifest`、`output.reports_dir`、`output.transcode_dir`、
+`output.partial_dir`、`output.database` 覆盖。输出目录不得位于扫描根目录内。
 
 ## 2. `manifest.json`
 
@@ -42,8 +45,11 @@ out/
 | `source_size` | int | 源文件字节数 |
 | `source_sha256` | string | 源文件 SHA-256 |
 | `source_mtime` | string | UTC 秒精度修改时间 |
-| `sidecar` | object | `path`、`present`、`error` |
-| `bom` | object/null | `encoding`、`length`、`hex` |
+| `sidecar` | object | `path`、`present`、`error`、`sha256`、`content_encoding`、`content_encoding_error` |
+| `bom` | object/null | `encoding`、`length`、`hex`（取自实际参与裁决的正文） |
+| `content_encoding` | object | 离线解封装状态，见 2.8；无 gzip 声明时为 `status: none` |
+| `entity_sha256` | string | 落盘原实体（可能是 gzip 压缩字节）的 SHA-256 |
+| `decoded_sha256` | string/null | 实际参与字符集裁决的正文 SHA-256；未发布正文时为 null |
 | `evidence` | array | 编码证据链，顺序固定 |
 | `statistical_candidates` | array | 所有候选的严格解码与评分 |
 | `decision` | object | 最终决策、置信度、方法、冲突、错误码 |
@@ -56,7 +62,7 @@ out/
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `source` | string | `bom`、`http_header`、`xml_declaration`、`meta_charset`、`fallback`、`statistical` |
+| `source` | string | `content_encoding`、`bom`、`http_header`、`xml_declaration`、`meta_charset`、`fallback`、`statistical` |
 | `declared` | string/null | 声明或候选编码名 |
 | `offset` | int/null | 源字节偏移；统计/HTTP/fallback 通常为 null |
 | `line` | int/null | 声明所在行；统计/HTTP/fallback 通常为 null |
@@ -95,8 +101,33 @@ out/
 | `bom_removed` | bool | 是否移除 BOM |
 | `rewrites` | array | charset 声明重写记录 |
 | `error` | string/null | 失败原因 |
+| `partial` | bool | 是否为已验证前缀的 partial 产物（不计入成功） |
+| `decoded_sha256` | string | 本次转码实际使用的（已解封装）正文字节摘要 |
+| `decoded_size` | int | 该正文字节数 |
 
 `rewrites` 每项包含 `kind`、`original`、`new`、`line`、`offset`、`position_basis`、`end_offset`。偏移以去除 BOM 后的解码源文本字符为单位。
+
+### 2.8 content_encoding
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `status` | string | `none`、`complete`、`strict_failed`、`verified_prefix` |
+| `success` | bool | 整体是否完整验收 |
+| `declared` | string/null | sidecar 中的 Content-Encoding 原文 |
+| `reason` | string | 可读状态说明 |
+| `entity_sha256` / `entity_size` | string/int | 原实体摘要与长度（压缩字节） |
+| `decoded_sha256` / `decoded_size` | string/null/int | 已验证正文摘要与长度；不发布正文时为 null/0 |
+| `published_body` | bool | 是否发布完整正文 |
+| `partial_prefix` | bool | 是否发布已验证前缀（独立 partial 产物） |
+| `members` | array | 每个 member 的偏移、长度、CRC/ISIZE 校验与失败位置 |
+| `verified_members` | int | 完整通过验收的前序 member 数 |
+| `failure` | object/null | `code`、`message`、`member_index`、`offset`、`detail_offset` |
+| `limits` | object | 本次生效的解封装前后上限 |
+
+每个 member 条目包含 `index`、`status`、`start_offset`、`header_length`、
+`deflate_offset`、`deflate_length`、`trailer_offset`、`end_offset`、
+`compressed_bytes`、`inflated_bytes`、`crc32`、`isize`、`crc_ok`、`isize_ok`、
+`error_code`、`error_message`、`error_offset`。所有偏移均相对原实体字节。
 
 ### 2.6 mojibake
 
@@ -104,7 +135,13 @@ out/
 
 ### 2.7 summary
 
-包含 `files_total`、`conflict_files`、`transcode_success`、`transcode_failed`、`files_with_warnings`、`warnings_total`、`warning_distribution`、`method_distribution`、`risk_distribution`。
+包含 `files_total`、`conflict_files`、`transcode_success`、`transcode_failed`、
+`transcode_partial`、`content_encoding_states`、`files_with_warnings`、`warnings_total`、
+`warning_distribution`、`method_distribution`、`risk_distribution`。
+
+`transcode_success` 只统计完整成功的转码；`verified_prefix` 路线产出的 partial
+文件计入 `transcode_partial` 与 `transcode_failed`，绝不能当作成功文件。
+`content_encoding_states` 按状态名升序给出各状态的文件数。
 
 `warning_distribution` 按错误码升序，每项为 `code`、`count`、`severity`。`conflict_files` 按“拥有非空 conflicts 的文件数”统计，而不是冲突消息条数。
 
@@ -123,7 +160,7 @@ out/
 | `files` | 每文件决策摘要，按路径升序 |
 | `ledger` | SQLite 台账摘要 |
 
-每文件摘要包含 `rel_path`、`encoding`、`confidence`、`method`、`conflict`、`error_codes`、`transcode_success`、`output_rel_path`、`output_sha256`、`risk_level`、`warning_count`、`warning_codes`。
+每文件摘要包含 `rel_path`、`encoding`、`confidence`、`method`、`conflict`、`error_codes`、`transcode_success`、`transcode_partial`、`output_rel_path`、`output_sha256`、`entity_sha256`、`decoded_sha256`、`content_encoding_status`、`risk_level`、`warning_count`、`warning_codes`。
 
 `report.md` 与 `report.html` 使用同一数据源。HTML 内联 CSS，不包含外链、远程脚本、远程字体或图片；Markdown 使用固定标题和表格顺序。
 
@@ -139,9 +176,9 @@ out/
 
 ### files
 
-`id`、`batch_id`、`idempotency_key`、`rel_path`、`source_size`、`source_sha256`、`source_mtime`、`final_encoding`、`confidence`、`method`、`conflict_count`、`warning_count`、`risk_level`、`transcode_success`、`output_rel_path`、`output_sha256`、`replacement_used`、`created_at`、`updated_at`。
+`id`、`batch_id`、`idempotency_key`、`rel_path`、`source_size`、`source_sha256`、`source_mtime`、`final_encoding`、`confidence`、`method`、`conflict_count`、`warning_count`、`risk_level`、`transcode_success`、`output_rel_path`、`output_sha256`、`replacement_used`、`sidecar_sha256`、`entity_sha256`、`decoded_sha256`、`content_encoding_status`、`content_encoding_published`、`transcode_partial`、`created_at`、`updated_at`。
 
-唯一约束：`(idempotency_key, rel_path)`。`idempotency_key = <source_sha256>:<rule_version>:<config_fingerprint>`。
+唯一约束：`(idempotency_key, rel_path)`。`idempotency_key = <source_sha256>:<rule_version>:<config_fingerprint>`。旧数据库启动时会幂等补齐新增列。
 
 ### evidence
 

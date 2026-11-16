@@ -38,7 +38,7 @@
             <td>{{ item.method }}</td>
             <td>{{ item.risk_level }}</td>
             <td class="num">{{ item.warning_count }}</td>
-            <td>{{ "成功" if item.transcode_success else "失败" }}</td>
+            <td>{{ "成功" if item.transcode_success else ("部分" if item.transcode_partial else "失败") }}</td>
           </tr>
         {% else %}
           <tr><td colspan="7" class="empty">本批次没有文件。</td></tr>

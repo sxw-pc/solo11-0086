@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Config
+from .evidence import content_encoding_value
 from .models import SourceFile
 
 
@@ -102,7 +103,9 @@ def scan(config: Config) -> list[SourceFile]:
         sidecar: dict[str, Any] = {}
         sidecar_error: str | None = None
         sidecar_rel: str | None = None
+        sidecar_sha: str | None = None
         if sidecar_path is not None:
+            sidecar_sha = _sha256(sidecar_path)
             sidecar, sidecar_error = _load_sidecar(sidecar_path)
             try:
                 sidecar_rel = sidecar_path.resolve().relative_to(
@@ -110,6 +113,15 @@ def scan(config: Config) -> list[SourceFile]:
                 ).as_posix()
             except ValueError:
                 sidecar_rel = sidecar_path.name
+        content_raw: str | None = None
+        content_error: str | None = None
+        if (
+            config.content_encoding_enabled
+            and config.trusted_http_headers
+            and sidecar
+            and sidecar_error is None
+        ):
+            content_raw, content_error = content_encoding_value(sidecar)
         results.append(
             SourceFile(
                 rel_path=rel_path,
@@ -121,6 +133,12 @@ def scan(config: Config) -> list[SourceFile]:
                 sidecar_rel=sidecar_rel,
                 sidecar=sidecar,
                 sidecar_error=sidecar_error,
+                sidecar_sha256=sidecar_sha,
+                content_encodings=(
+                    (content_raw,) if content_raw and not content_error else ()
+                ),
+                content_encoding_raw=content_raw,
+                content_encoding_error=content_error,
             )
         )
     return results

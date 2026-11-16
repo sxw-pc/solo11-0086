@@ -14,6 +14,7 @@ output:
   manifest: manifest.json
   reports_dir: reports
   transcode_dir: transcoded
+  partial_dir: partial
   database: decodebench.sqlite3
 
 detection:
@@ -32,6 +33,15 @@ detection:
 transcode:
   rewrite_declarations: true
   errors: strict
+
+content_encoding:
+  enabled: true
+  # strict: 任一 member 失败都不发布正文；verified_prefix: 只发布已验证前缀
+  failure_route: verified_prefix
+  max_members: 64
+  entity_max_bytes: 8388608
+  inflate_max_bytes: 33554432
+  max_expansion_ratio: 200.0
 
 mojibake:
   question_run_threshold: 3

@@ -22,6 +22,10 @@ class SourceFile:
     sidecar_rel: str | None = None
     sidecar: dict[str, Any] = field(default_factory=dict)
     sidecar_error: str | None = None
+    sidecar_sha256: str | None = None
+    content_encodings: tuple[str, ...] = ()
+    content_encoding_raw: str | None = None
+    content_encoding_error: str | None = None
 
 
 @dataclass
@@ -165,6 +169,9 @@ class TranscodeResult:
     bom_removed: bool
     rewrites: list[dict[str, Any]]
     error: str | None = None
+    partial: bool = False
+    decoded_sha256: str | None = None
+    decoded_size: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -181,4 +188,46 @@ class TranscodeResult:
             "bom_removed": self.bom_removed,
             "rewrites": self.rewrites,
             "error": self.error,
+            "partial": self.partial,
+            "decoded_sha256": self.decoded_sha256,
+            "decoded_size": self.decoded_size,
+        }
+
+
+@dataclass
+class DecompressResult:
+    """离线解封装（gzip）的原实体与已验证正文状态。"""
+
+    status: str
+    success: bool
+    declared: str | None
+    reason: str
+    entity_sha256: str | None
+    entity_size: int
+    decoded_sha256: str | None
+    decoded_size: int
+    published_body: bool
+    partial_prefix: bool
+    members: list[dict[str, Any]]
+    verified_members: int
+    failure: dict[str, Any] | None
+    limits: dict[str, Any]
+    body: bytes | None = field(default=None, repr=False, compare=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "success": self.success,
+            "declared": self.declared,
+            "reason": self.reason,
+            "entity_sha256": self.entity_sha256,
+            "entity_size": self.entity_size,
+            "decoded_sha256": self.decoded_sha256,
+            "decoded_size": self.decoded_size,
+            "published_body": self.published_body,
+            "partial_prefix": self.partial_prefix,
+            "members": self.members,
+            "verified_members": self.verified_members,
+            "failure": self.failure,
+            "limits": self.limits,
         }

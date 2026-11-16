@@ -29,6 +29,7 @@ DEFAULTS: dict[str, Any] = {
         "manifest": "manifest.json",
         "reports_dir": "reports",
         "transcode_dir": "transcoded",
+        "partial_dir": "partial",
         "database": "decodebench.sqlite3",
     },
     "detection": {
@@ -46,6 +47,14 @@ DEFAULTS: dict[str, Any] = {
         "minimum_confidence": 0.55,
     },
     "transcode": {"rewrite_declarations": True, "errors": "strict"},
+    "content_encoding": {
+        "enabled": True,
+        "failure_route": "strict",
+        "max_members": 64,
+        "entity_max_bytes": 8388608,
+        "inflate_max_bytes": 33554432,
+        "max_expansion_ratio": 200.0,
+    },
     "mojibake": {"question_run_threshold": 3, "control_ratio_threshold": 0.01},
     "web": {"host": "127.0.0.1", "port": 5017},
 }
@@ -62,6 +71,7 @@ class Config:
     manifest_path: Path
     reports_dir: Path
     transcode_dir: Path
+    partial_dir: Path
     db_path: Path
     fallback_encoding: str
     candidate_encodings: tuple[str, ...]
@@ -69,6 +79,12 @@ class Config:
     minimum_confidence: float
     rewrite_declarations: bool
     transcode_errors: str
+    content_encoding_enabled: bool
+    content_encoding_route: str
+    gzip_max_members: int
+    entity_max_bytes: int
+    inflate_max_bytes: int
+    max_expansion_ratio: float
     question_run_threshold: int
     control_ratio_threshold: float
     web_host: str
@@ -80,6 +96,7 @@ class Config:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self.transcode_dir.mkdir(parents=True, exist_ok=True)
+        self.partial_dir.mkdir(parents=True, exist_ok=True)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -131,6 +148,7 @@ def load_config(path: str | Path) -> Config:
     output = _require(raw, "output", dict, "配置")
     detection = _require(raw, "detection", dict, "配置")
     transcode = _require(raw, "transcode", dict, "配置")
+    content_encoding = _require(raw, "content_encoding", dict, "配置")
     mojibake = _require(raw, "mojibake", dict, "配置")
     web = _require(raw, "web", dict, "配置")
 
@@ -155,14 +173,20 @@ def load_config(path: str | Path) -> Config:
     reports_name = _require(output, "reports_dir", str, "output")
     transcode_name = _require(output, "transcode_dir", str, "output")
     database_name = _require(output, "database", str, "output")
+    partial_name = output.get("partial_dir", "partial")
+    if not isinstance(partial_name, str) or not partial_name:
+        raise ConfigError("output.partial_dir 必须是非空字符串")
     manifest_path = _resolve(base, str(Path(out_value) / manifest_name))
     reports_dir = _resolve(base, str(Path(out_value) / reports_name))
     transcode_dir = _resolve(base, str(Path(out_value) / transcode_name))
+    partial_dir = _resolve(base, str(Path(out_value) / partial_name))
     db_path = _resolve(base, str(Path(out_value) / database_name))
     if out_dir == scan_root or scan_root in out_dir.parents:
         raise ConfigError("输出目录不得位于扫描源目录内，以保护源文件")
     if transcode_dir == scan_root or scan_root in transcode_dir.parents:
         raise ConfigError("转码目录不得位于扫描源目录内，以保护源文件")
+    if partial_dir == scan_root or scan_root in partial_dir.parents:
+        raise ConfigError("前缀归档目录不得位于扫描源目录内，以保护源文件")
     if manifest_path == scan_root or reports_dir == scan_root:
         raise ConfigError("报告与清单不得写入扫描源目录")
 
@@ -195,6 +219,26 @@ def load_config(path: str | Path) -> Config:
     rewrite = transcode.get("rewrite_declarations")
     if not isinstance(rewrite, bool):
         raise ConfigError("transcode.rewrite_declarations 必须是布尔值")
+    enabled = content_encoding.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ConfigError("content_encoding.enabled 必须是布尔值")
+    route = content_encoding.get("failure_route")
+    if route not in {"strict", "verified_prefix"}:
+        raise ConfigError(
+            "content_encoding.failure_route 只能是 strict 或 verified_prefix"
+        )
+    max_members = content_encoding.get("max_members")
+    if not isinstance(max_members, int) or max_members < 1:
+        raise ConfigError("content_encoding.max_members 必须是 >=1 的整数")
+    entity_max = content_encoding.get("entity_max_bytes")
+    inflate_max = content_encoding.get("inflate_max_bytes")
+    ratio_max = content_encoding.get("max_expansion_ratio")
+    if not isinstance(entity_max, int) or entity_max < 1:
+        raise ConfigError("content_encoding.entity_max_bytes 必须是 >=1 的整数")
+    if not isinstance(inflate_max, int) or inflate_max < 1:
+        raise ConfigError("content_encoding.inflate_max_bytes 必须是 >=1 的整数")
+    if not isinstance(ratio_max, (int, float)) or float(ratio_max) <= 0:
+        raise ConfigError("content_encoding.max_expansion_ratio 必须大于 0")
     qr_threshold = mojibake.get("question_run_threshold")
     cr_threshold = mojibake.get("control_ratio_threshold")
     if not isinstance(qr_threshold, int) or qr_threshold < 2:
@@ -229,6 +273,7 @@ def load_config(path: str | Path) -> Config:
         manifest_path=manifest_path,
         reports_dir=reports_dir,
         transcode_dir=transcode_dir,
+        partial_dir=partial_dir,
         db_path=db_path,
         fallback_encoding=fallback,
         candidate_encodings=tuple(dict.fromkeys(candidates)),
@@ -236,6 +281,12 @@ def load_config(path: str | Path) -> Config:
         minimum_confidence=float(minimum),
         rewrite_declarations=rewrite,
         transcode_errors=errors,
+        content_encoding_enabled=enabled,
+        content_encoding_route=route,
+        gzip_max_members=max_members,
+        entity_max_bytes=entity_max,
+        inflate_max_bytes=inflate_max,
+        max_expansion_ratio=float(ratio_max),
         question_run_threshold=qr_threshold,
         control_ratio_threshold=float(cr_threshold),
         web_host=host,

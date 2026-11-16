@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
 from typing import Any
+
+
+def sha256_hex(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
 
 
 def json_text(data: Any) -> str:

@@ -1,7 +1,7 @@
 """采文解码台：本地采集响应编码诊断与转码归档工具。"""
 
 __version__ = "0.1.0"
-RULE_VERSION = "decodebench-2024.01.1"
+RULE_VERSION = "decodebench-2024.02.1"
 
 ERROR_CODES = {
     "E_BOM_DECL_CONFLICT": "BOM 与文档声明不一致",
@@ -22,6 +22,22 @@ ERROR_CODES = {
     "W_CONTROL_CHARS": "正文包含不可打印控制字符",
     "W_QUESTION_RUNS": "正文包含连续问号",
     "W_SURROGATE_TRACE": "正文包含非法代理项痕迹",
+    "E_CONTENT_ENCODING_INVALID": "sidecar 的 Content-Encoding 声明不可用",
+    "E_GZIP_NOT_GZIP": "声明 gzip，但实体不是 gzip 格式",
+    "E_GZIP_MEMBER_BOUNDARY": "gzip member 边界不可信",
+    "E_GZIP_HEADER_INVALID": "gzip member 头不合法",
+    "E_GZIP_HEADER_CRC_MISMATCH": "gzip member 头 FHCRC 不匹配",
+    "E_GZIP_MEMBER_TRUNCATED": "gzip member 正文被截断",
+    "E_GZIP_TRAILER_MISSING": "gzip member 尾部不完整",
+    "E_GZIP_CRC_MISMATCH": "gzip member CRC32 不匹配",
+    "E_GZIP_ISIZE_MISMATCH": "gzip member ISIZE 不匹配",
+    "E_GZIP_DECOMPRESS_ERROR": "gzip deflate 流损坏",
+    "E_GZIP_MEMBER_LIMIT": "gzip member 数超过上限",
+    "E_GZIP_ENTITY_LIMIT": "gzip 实体超过解封装前字节上限",
+    "E_GZIP_INFLATE_LIMIT": "gzip 解压后字节超过上限",
+    "E_GZIP_RATIO_LIMIT": "gzip 解压膨胀比超过上限",
+    "E_GZIP_EXPANSION_LIMIT": "gzip 解封装被上限拒绝，未发布正文",
+    "W_GZIP_PARTIAL_PREFIX": "仅归档了已验证的 gzip 前缀正文",
 }
 
 CONFLICT_CODES = frozenset(code for code in ERROR_CODES if code.endswith("CONFLICT"))

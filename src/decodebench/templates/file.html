@@ -61,9 +61,12 @@
   </section>
 
   <section class="panel">
-    <h2>转码输出</h2>
+    <h2>解封装与转码输出</h2>
     <dl class="facts">
-      <dt>状态</dt><dd>{{ "成功" if detail.transcode_success else "失败" }}</dd>
+      <dt>Content-Encoding 状态</dt><dd>{{ detail.content_encoding_status }}</dd>
+      <dt>原实体 SHA-256</dt><dd class="mono">{{ detail.entity_sha256 or "-" }}</dd>
+      <dt>参与裁决正文 SHA-256</dt><dd class="mono">{{ detail.decoded_sha256 or "-" }}</dd>
+      <dt>转码状态</dt><dd>{{ "成功" if detail.transcode_success else "失败" }}{% if detail.transcode_partial %}（partial 前缀，不可当作完整文件）{% endif %}</dd>
       <dt>输出路径</dt><dd class="mono">{{ detail.output_rel_path or "-" }}</dd>
       <dt>输出 SHA-256</dt><dd class="mono">{{ detail.output_sha256 or "-" }}</dd>
       <dt>字符替换</dt><dd>{{ "是" if detail.replacement_used else "否" }}</dd>

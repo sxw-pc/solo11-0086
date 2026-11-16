@@ -74,9 +74,10 @@ make count
 
 - 扫描根与扩展名；
 - sidecar 后缀与可选 sidecar 根目录；
-- 输出、manifest、报告、转码目录与 SQLite 路径；
+- 输出、manifest、报告、转码目录、partial 前缀目录与 SQLite 路径；
 - fallback 编码、候选编码、置信度阈值；
 - 转码错误策略 `strict`/`replace` 与声明重写开关；
+- Content-Encoding 解封装开关、失败路线、member 数/字节/膨胀比上限；
 - mojibake 阈值；
 - 复核台回环地址与端口。
 
@@ -94,9 +95,29 @@ out/
     report.html                  # 自包含、零外链、零脚本
   transcoded/
     <保留相对目录结构的 UTF-8 输出>
+  partial/
+    <rel_path>.partial.utf8      # verified_prefix 路线的已验证前缀
 ```
 
 源文件只读。转码输出独立写入 `output.transcode_dir`，每个输出记录源 SHA-256、输出 SHA-256、使用编码、错误策略和替换字符数量。HTML/XML 可把 charset 声明改写为 `utf-8`，重写会记录原文、新值与位置。
+
+## 离线 Content-Encoding: gzip
+
+采集管道可能把 HTTP gzip 实体字节原样落盘。只有当可信本地 sidecar 明确声明
+`Content-Encoding: gzip`（或 `x-gzip`）时才离线解封装；没有该声明的旧样本仍按原字节
+流程处理。串接的多 gzip member 会逐个独立校验固定头、deflate 流、8 字节尾、CRC32 与
+ISIZE，失败 member 的字节绝不进入输出。
+
+`content_encoding.failure_route` 提供两条授权路线：
+
+- `strict`：整体验收失败时不发布正文，只记录实体摘要与失败位置；
+- `verified_prefix`：只把此前完整 member 的正文写成 `.partial.utf8` 前缀产物，显式标为
+  partial，`transcode.success=false`，不计入成功数。
+
+报告同时给出原实体 `entity_sha256` 与真正参与字符集裁决的 `decoded_sha256`。
+`entity_max_bytes`、`inflate_max_bytes` 与 `max_expansion_ratio` 在解封装前后设限，
+超限时在继续分配大块内存前停止并留下稳定诊断；sidecar 错宣 gzip 时按失败处理，不从
+原字节猜字符集。失败会清理同名旧产物，重跑同一实体与 sidecar 得到同一裁决与产物摘要。
 
 ## 检测顺序
 
@@ -152,6 +173,8 @@ pytest -q
 - mojibake 定位、风险等级与警告；
 - SQLite 幂等与只读查询；
 - 固定 `--now` 的报告/manifest 字节稳定性；
+- 离线 gzip：有效多 member、第二 member 截断/CRC 错、膨胀超限、sidecar 错宣 gzip、
+  无 gzip 旧样本、partial 前缀产物与重跑确定性；
 - Flask 只读页面与不存在可变路由；
 - 真实命令行子进程端到端测试。
 
@@ -173,6 +196,8 @@ decodebench/
     cli.py
     config.py
     scanner.py
+    gzip_members.py
+    decompress.py
     evidence.py
     detectors.py
     scorer.py
@@ -214,6 +239,9 @@ decodebench/
     test_reporting_stability.py
     test_web_readonly.py
     test_cli_pipeline.py
+    test_content_encoding.py
+    test_content_encoding_limits.py
+    gzip_support.py
   docs/
     ARCHITECTURE.md
     COMPLIANCE.md
@@ -228,7 +256,7 @@ decodebench/
 python scripts/count_lines.py
 ```
 
-当前源码、脚本与测试合计约 3,847 行；所有 Python 文件均不超过 300 行。`count_lines.py` 会检查 2500–4500 行总量与单文件上限，任一条件不满足即返回非零。
+当前源码、脚本与测试合计约 5,100 行；所有 Python 文件均不超过 300 行。`count_lines.py` 会检查 2500–5600 行总量与单文件上限，任一条件不满足即返回非零。
 
 ## 合规
 

@@ -59,7 +59,10 @@ def list_files(db_path: Path, batch_id: str) -> list[dict[str, Any]]:
             """
             SELECT id, rel_path, source_size, source_sha256, final_encoding,
                    confidence, method, conflict_count, warning_count, risk_level,
-                   transcode_success, output_rel_path, output_sha256, replacement_used
+                   transcode_success, output_rel_path, output_sha256, replacement_used,
+                   sidecar_sha256, entity_sha256, decoded_sha256,
+                   content_encoding_status, content_encoding_published,
+                   transcode_partial
             FROM files
             WHERE batch_id = ?
             ORDER BY rel_path ASC

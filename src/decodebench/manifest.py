@@ -12,6 +12,7 @@ from .detectors import detect_bom
 from .models import (
     CandidateResult,
     Decision,
+    DecompressResult,
     Evidence,
     MojibakeReport,
     SourceFile,
@@ -44,11 +45,22 @@ def build_file_entry(
     candidates: list[CandidateResult],
     decision: Decision,
     transcode: TranscodeResult,
-    mojibake: MojibakeReport,
+    mojibake: MojibakeReport | None,
     warnings: list[WarningItem],
+    *,
+    decompress: DecompressResult | None = None,
+    body: bytes | None = None,
 ) -> dict[str, Any]:
-    bom = detect_bom(raw)
+    inspected = body if body is not None else raw
+    reviewed = decompress is not None and decompress.status != "none"
+    # 解封装失败且未发布正文时，gzip 实体本身不是可用于 BOM 的证据。
+    bom = detect_bom(inspected) if (not reviewed or body is not None) else None
     warning_rows = _warning_rows(warnings)
+    content = decompress.to_dict() if decompress is not None else None
+    if decompress is None or decompress.status == "none":
+        body_sha: str | None = source.sha256
+    else:
+        body_sha = decompress.decoded_sha256
     return {
         "rel_path": source.rel_path,
         "source_size": source.size,
@@ -58,13 +70,27 @@ def build_file_entry(
             "path": source.sidecar_rel,
             "present": source.sidecar_path is not None,
             "error": source.sidecar_error,
+            "sha256": source.sidecar_sha256,
+            "content_encoding": source.content_encoding_raw,
+            "content_encoding_error": source.content_encoding_error,
         },
         "bom": bom,
+        "content_encoding": content,
+        "entity_sha256": source.sha256,
+        "decoded_sha256": body_sha,
         "evidence": [item.to_dict() for item in evidence],
         "statistical_candidates": [item.to_dict() for item in candidates],
         "decision": decision.to_dict(),
         "transcode": transcode.to_dict(),
-        "mojibake": mojibake.to_dict(),
+        "mojibake": (
+            mojibake.to_dict()
+            if mojibake is not None
+            else {
+                "level": "none",
+                "findings": [],
+                "recommendation": "未对正文做乱码诊断：解封装未通过验收，没有发布正文。",
+            }
+        ),
         "warnings": warning_rows,
         "warning_count": len(warning_rows),
     }
@@ -75,9 +101,11 @@ def summarize(files: list[dict[str, Any]]) -> dict[str, Any]:
     warning_severity: dict[str, str] = {}
     methods: Counter[str] = Counter()
     risks: Counter[str] = Counter()
+    content_states: Counter[str] = Counter()
     conflicts = 0
     transcoded = 0
     failed = 0
+    partial = 0
     with_warnings = 0
     for item in files:
         decision = item["decision"]
@@ -87,6 +115,10 @@ def summarize(files: list[dict[str, Any]]) -> dict[str, Any]:
             transcoded += 1
         else:
             failed += 1
+        if item["transcode"].get("partial"):
+            partial += 1
+        content = item.get("content_encoding") or {}
+        content_states[str(content.get("status", "none"))] += 1
         methods[str(decision["method"])] += 1
         risks[str(item["mojibake"]["level"])] += 1
         if item["warnings"]:
@@ -106,6 +138,11 @@ def summarize(files: list[dict[str, Any]]) -> dict[str, Any]:
         "conflict_files": conflicts,
         "transcode_success": transcoded,
         "transcode_failed": failed,
+        "transcode_partial": partial,
+        "content_encoding_states": [
+            {"status": status, "count": content_states[status]}
+            for status in sorted(content_states)
+        ],
         "files_with_warnings": with_warnings,
         "warnings_total": sum(warning_counter.values()),
         "warning_distribution": distribution,

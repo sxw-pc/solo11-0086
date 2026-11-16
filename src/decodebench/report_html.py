@@ -63,19 +63,24 @@ def _warning_table(report: dict[str, Any]) -> str:
 
 def _file_table(report: dict[str, Any]) -> str:
     if not report["files"]:
-        return '<tr><td colspan="8">无文件</td></tr>'
+        return '<tr><td colspan="9">无文件</td></tr>'
     rows: list[str] = []
     for item in report["files"]:
         conflict = '<span class="tag">是</span>' if item["conflict"] else "否"
+        if item.get("transcode_partial"):
+            transcode = '<span class="tag">部分（partial）</span>'
+        else:
+            transcode = "成功" if item["transcode_success"] else "失败"
         rows.append(
             "<tr><td>{}</td><td>{}</td><td class=\"num\">{:.6f}</td><td>{}</td>"
-            "<td>{}</td><td>{}</td><td>{}</td><td class=\"num\">{}</td></tr>".format(
+            "<td>{}</td><td>{}</td><td>{}</td><td>{}</td><td class=\"num\">{}</td></tr>".format(
                 _text(item["rel_path"]),
                 _text(item["encoding"]),
                 float(item["confidence"]),
                 _text(item["method"]),
                 conflict,
-                "成功" if item["transcode_success"] else "失败",
+                _text(item.get("content_encoding_status", "none")),
+                transcode,
                 _text(item["risk_level"]),
                 _text(item["warning_count"]),
             )
@@ -126,7 +131,7 @@ def render_html(report: dict[str, Any]) -> str:
 <h2>文件决策明细</h2>
 <table>
 <thead><tr><th>相对路径</th><th>编码</th><th class="num">置信度</th><th>方法</th>
-<th>冲突</th><th>转码</th><th>风险</th><th class="num">警告</th></tr></thead>
+<th>冲突</th><th>解封装</th><th>转码</th><th>风险</th><th class="num">警告</th></tr></thead>
 <tbody>{_file_table(report)}</tbody>
 </table>
 <h2>SQLite 台账摘要</h2>

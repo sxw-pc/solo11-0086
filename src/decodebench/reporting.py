@@ -19,6 +19,7 @@ def build_report(
     files: list[dict[str, Any]] = []
     for item in manifest["files"]:
         decision = item["decision"]
+        content = item.get("content_encoding") or {}
         files.append(
             {
                 "rel_path": item["rel_path"],
@@ -28,8 +29,12 @@ def build_report(
                 "conflict": bool(decision["conflicts"]),
                 "error_codes": list(decision["error_codes"]),
                 "transcode_success": bool(item["transcode"]["success"]),
+                "transcode_partial": bool(item["transcode"].get("partial")),
                 "output_rel_path": item["transcode"]["output_rel_path"],
                 "output_sha256": item["transcode"]["output_sha256"],
+                "entity_sha256": item.get("entity_sha256"),
+                "decoded_sha256": item.get("decoded_sha256"),
+                "content_encoding_status": content.get("status", "none"),
                 "risk_level": item["mojibake"]["level"],
                 "warning_count": item["warning_count"],
                 "warning_codes": sorted({str(row["code"]) for row in item["warnings"]}),
@@ -75,6 +80,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"| 冲突文件数 | {summary['conflict_files']} |",
         f"| 转码成功数 | {summary['transcode_success']} |",
         f"| 转码失败数 | {summary['transcode_failed']} |",
+        f"| 已验证前缀（partial）数 | {summary.get('transcode_partial', 0)} |",
         f"| 有警告文件数 | {summary['files_with_warnings']} |",
         f"| 警告总数 | {summary['warnings_total']} |",
         "",
@@ -95,20 +101,25 @@ def render_markdown(report: dict[str, Any]) -> str:
             "",
             "## 文件决策明细",
             "",
-            "| 相对路径 | 编码 | 置信度 | 方法 | 冲突 | 转码 | 风险 | 警告 |",
-            "| --- | --- | ---: | --- | --- | --- | --- | ---: |",
+            "| 相对路径 | 编码 | 置信度 | 方法 | 冲突 | 解封装 | 转码 | 风险 | 警告 |",
+            "| --- | --- | ---: | --- | --- | --- | --- | --- | ---: |",
         ]
     )
     for item in report["files"]:
         lines.append(
             "| {path} | {encoding} | {confidence:.6f} | {method} | {conflict} | "
-            "{transcode} | {risk} | {warnings} |".format(
+            "{content} | {transcode} | {risk} | {warnings} |".format(
                 path=_cell(item["rel_path"]),
                 encoding=_cell(item["encoding"]),
                 confidence=float(item["confidence"]),
                 method=_cell(item["method"]),
                 conflict="是" if item["conflict"] else "否",
-                transcode="成功" if item["transcode_success"] else "失败",
+                content=_cell(item["content_encoding_status"]),
+                transcode=(
+                    "部分（partial）"
+                    if item.get("transcode_partial")
+                    else ("成功" if item["transcode_success"] else "失败")
+                ),
                 risk=_cell(item["risk_level"]),
                 warnings=item["warning_count"],
             )

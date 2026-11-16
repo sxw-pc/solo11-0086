@@ -22,6 +22,38 @@ META_CHARSET = re.compile(
     rb"charset\s*=\s*[\"']?\s*([A-Za-z][A-Za-z0-9._-]*)", re.IGNORECASE
 )
 HEADER_CHARSET = re.compile(r"charset\s*=\s*[\"']?\s*([A-Za-z][A-Za-z0-9._-]*)", re.IGNORECASE)
+CONTENT_ENCODING_SPLIT = re.compile(r"[,\s]+")
+
+
+def content_encoding_value(sidecar: dict[str, Any]) -> tuple[str | None, str | None]:
+    """返回 sidecar 中唯一声明的 Content-Encoding 原文与错误。
+
+    多个不同取值、空值或包含不支持的编码链都视为错误；此时调用方必须按
+    失败处理，不能用原字节继续猜字符集。
+    """
+    headers = sidecar.get("headers", {})
+    if not isinstance(headers, dict):
+        return None, None
+    values = sorted(
+        str(value) for name, value in headers.items() if str(name).lower() == "content-encoding"
+    )
+    if not values:
+        return None, None
+    if len(set(values)) > 1:
+        return ", ".join(values), f"sidecar 存在多个不一致的 Content-Encoding: {values}"
+    raw = values[0]
+    tokens = [item for item in CONTENT_ENCODING_SPLIT.split(raw.strip()) if item]
+    if not tokens:
+        return raw, "sidecar Content-Encoding 为空"
+    normalized = [
+        "gzip" if token.lower() in {"gzip", "x-gzip"} else token.lower()
+        for token in tokens
+    ]
+    if normalized in (["identity"], ["none"]):
+        return None, None
+    if normalized != ["gzip"]:
+        return raw.strip(), f"sidecar Content-Encoding 不是单一 gzip: {raw}"
+    return raw.strip(), None
 
 
 def _line_for(raw: bytes, offset: int) -> int:
@@ -177,6 +209,9 @@ def all_declared(evidence: list[Evidence]) -> list[Evidence]:
 
 def apply_decision_matches(evidence: list[Evidence], decision_encoding: str) -> None:
     for item in evidence:
+        if item.source == "content_encoding":
+            # Content-Encoding 不是字符集声明，不参与字符集一致性比较。
+            continue
         if item.source == "fallback":
             item.matches_decision = compatible_encoding(item.declared, decision_encoding)
         elif item.declared:

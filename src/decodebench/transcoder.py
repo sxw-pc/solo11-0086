@@ -1,4 +1,4 @@
-"""UTF-8 转码输出与编码声明重写。"""
+"""UTF-8 转码输出、声明重写与失败时的旧产物清理。"""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ META_CHARSET = re.compile(
     re.IGNORECASE,
 )
 REWRITABLE_SUFFIXES = {".html", ".htm", ".xml"}
+PARTIAL_SUFFIX = ".partial.utf8"
 
 
 def _line_at(text: str, offset: int) -> int:
@@ -82,36 +83,101 @@ def rewrite_declarations(text: str, suffix: str) -> tuple[str, list[dict[str, ob
 def _atomic_write(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
-    with temporary.open("wb") as stream:
-        stream.write(data)
-    os.replace(temporary, path)
+    try:
+        with temporary.open("wb") as stream:
+            stream.write(data)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
-def transcode(source: SourceFile, raw: bytes, encoding: str, config: Config) -> TranscodeResult:
-    """按裁决编码严格或替换解码，只写入独立转码目录。"""
+def output_paths(source: SourceFile, config: Config) -> tuple[Path, Path]:
+    """返回 (完整归档路径, partial 前缀归档路径)。"""
+    full = config.transcode_dir / source.rel_path
+    partial = config.partial_dir / (source.rel_path + PARTIAL_SUFFIX)
+    for path, root in ((full, config.transcode_dir), (partial, config.partial_dir)):
+        try:
+            path.resolve().relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"转码输出路径越界: {source.rel_path}") from exc
+    return full, partial
+
+
+def _remove(path: Path) -> bool:
+    removed = False
+    for candidate in (path, path.with_name(path.name + ".tmp")):
+        try:
+            candidate.unlink()
+            removed = True
+        except FileNotFoundError:
+            pass
+    return removed
+
+
+def discard_output(source: SourceFile, config: Config) -> None:
+    """失败时移除旧产物，避免上次成功文件被当成本次结果。"""
+    full, partial = output_paths(source, config)
+    _remove(full)
+    _remove(partial)
+
+
+def failed_result(
+    source: SourceFile,
+    encoding: str,
+    config: Config,
+    error: str,
+    decoded_sha256: str | None = None,
+    decoded_size: int = 0,
+) -> TranscodeResult:
+    return TranscodeResult(
+        success=False,
+        encoding=encoding,
+        errors=config.transcode_errors,
+        output_rel_path=None,
+        source_sha256=source.sha256,
+        output_sha256=None,
+        bytes_written=0,
+        decoded_chars=0,
+        replacement_count=0,
+        replacement_used=False,
+        bom_removed=False,
+        rewrites=[],
+        error=error[:300],
+        partial=False,
+        decoded_sha256=decoded_sha256,
+        decoded_size=decoded_size,
+    )
+
+
+def transcode(
+    source: SourceFile,
+    body: bytes,
+    encoding: str,
+    config: Config,
+    *,
+    partial: bool = False,
+) -> TranscodeResult:
+    """按裁决编码解码正文，只写入独立转码目录或独立的 partial 目录。"""
     canonical = canonical_encoding(encoding)
     errors = config.transcode_errors
+    body_sha = hashlib.sha256(body).hexdigest()
+    full_path, partial_path = output_paths(source, config)
     try:
-        text = raw.decode(canonical, errors=errors)
+        text = body.decode(canonical, errors=errors)
     except (UnicodeError, LookupError, ValueError) as exc:
-        return TranscodeResult(
-            success=False,
-            encoding=canonical,
-            errors=errors,
-            output_rel_path=None,
-            source_sha256=source.sha256,
-            output_sha256=None,
-            bytes_written=0,
-            decoded_chars=0,
-            replacement_count=0,
-            replacement_used=False,
-            bom_removed=False,
-            rewrites=[],
-            error=f"{type(exc).__name__}: {exc}"[:300],
+        discard_output(source, config)
+        return failed_result(
+            source,
+            canonical,
+            config,
+            f"{type(exc).__name__}: {exc}",
+            decoded_sha256=body_sha,
+            decoded_size=len(body),
         )
 
     bom_removed = False
-    if detect_bom(raw) is not None and text.startswith("﻿"):
+    if detect_bom(body) is not None and text.startswith("﻿"):
         text = text[1:]
         bom_removed = True
 
@@ -119,26 +185,27 @@ def transcode(source: SourceFile, raw: bytes, encoding: str, config: Config) -> 
     if config.rewrite_declarations:
         text, rewrites = rewrite_declarations(text, Path(source.rel_path).suffix)
 
-    output = config.transcode_dir / source.rel_path
-    try:
-        output.resolve().relative_to(config.transcode_dir)
-    except ValueError as exc:
-        raise ValueError(f"转码输出路径越界: {source.rel_path}") from exc
     payload = text.encode("utf-8")
+    output = partial_path if partial else full_path
     _atomic_write(output, payload)
-    output_sha = hashlib.sha256(payload).hexdigest()
+    # 另一条路线的旧产物不属于本次结果，必须清掉。
+    _remove(full_path if partial else partial_path)
     replacement_count = text.count(chr(0xFFFD))
+    output_rel = source.rel_path + PARTIAL_SUFFIX if partial else source.rel_path
     return TranscodeResult(
-        success=True,
+        success=not partial,
         encoding=canonical,
         errors=errors,
-        output_rel_path=source.rel_path,
+        output_rel_path=output_rel,
         source_sha256=source.sha256,
-        output_sha256=output_sha,
+        output_sha256=hashlib.sha256(payload).hexdigest(),
         bytes_written=len(payload),
         decoded_chars=len(text),
         replacement_count=replacement_count,
         replacement_used=replacement_count > 0,
         bom_removed=bom_removed,
         rewrites=rewrites,
+        partial=partial,
+        decoded_sha256=body_sha,
+        decoded_size=len(body),
     )
