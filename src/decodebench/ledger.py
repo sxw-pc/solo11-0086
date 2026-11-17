@@ -34,7 +34,7 @@ def initialize(db_path: Path) -> None:
         connection.close()
 
 
-def _batch_identity(files: list[dict[str, Any]], config: Config) -> tuple[str, str]:
+def batch_identity(files: list[dict[str, Any]], config: Config) -> tuple[str, str]:
     parts = sorted(
         f"{idempotency_key(str(item['source_sha256']), config.fingerprint)}|{item['rel_path']}"
         for item in files
@@ -204,7 +204,7 @@ def _upsert_file(
     return file_id
 
 
-def _ledger_summary(connection: sqlite3.Connection, batch_id: str) -> dict[str, Any]:
+def summarize_batch(connection: sqlite3.Connection, batch_id: str) -> dict[str, Any]:
     file_count = connection.execute(
         "SELECT COUNT(*) AS n FROM files WHERE batch_id = ?", (batch_id,)
     ).fetchone()["n"]
@@ -251,7 +251,7 @@ def record_batch(config: Config, manifest: dict[str, Any], now: str) -> dict[str
     """幂等写入一个批次；相同 key 只更新既有批次与文件。"""
     initialize(config.db_path)
     files = manifest["files"]
-    batch_key, batch_id = _batch_identity(files, config)
+    batch_key, batch_id = batch_identity(files, config)
     conflict_count = sum(1 for item in files if item["decision"]["conflicts"])
     transcoded_count = sum(1 for item in files if item["transcode"]["success"])
     connection = _connect(config.db_path)
@@ -269,6 +269,6 @@ def record_batch(config: Config, manifest: dict[str, Any], now: str) -> dict[str
             )
             for item in files:
                 _upsert_file(connection, batch_id, item, config, now)
-        return _ledger_summary(connection, batch_id)
+        return summarize_batch(connection, batch_id)
     finally:
         connection.close()

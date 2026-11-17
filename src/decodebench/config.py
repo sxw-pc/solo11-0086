@@ -48,6 +48,12 @@ DEFAULTS: dict[str, Any] = {
     "transcode": {"rewrite_declarations": True, "errors": "strict"},
     "mojibake": {"question_run_threshold": 3, "control_ratio_threshold": 0.01},
     "web": {"host": "127.0.0.1", "port": 5017},
+    "sharing": {
+        "audit_contact": "local-audit@example.invalid",
+        "min_group_size": 2,
+        "route": "suppress",
+        "export_dir": "shared",
+    },
 }
 
 
@@ -73,6 +79,10 @@ class Config:
     control_ratio_threshold: float
     web_host: str
     web_port: int
+    share_audit_contact: str
+    share_min_group_size: int
+    share_route: str
+    export_dir: Path
     raw: dict[str, Any]
     fingerprint: str
 
@@ -133,6 +143,7 @@ def load_config(path: str | Path) -> Config:
     transcode = _require(raw, "transcode", dict, "配置")
     mojibake = _require(raw, "mojibake", dict, "配置")
     web = _require(raw, "web", dict, "配置")
+    sharing = _require(raw, "sharing", dict, "配置")
 
     base = config_path.parent
     root_value = _require(scan, "root", str, "scan")
@@ -165,6 +176,20 @@ def load_config(path: str | Path) -> Config:
         raise ConfigError("转码目录不得位于扫描源目录内，以保护源文件")
     if manifest_path == scan_root or reports_dir == scan_root:
         raise ConfigError("报告与清单不得写入扫描源目录")
+
+    share_contact = sharing.get("audit_contact")
+    if not isinstance(share_contact, str) or not share_contact.strip():
+        raise ConfigError("sharing.audit_contact 必须是非空字符串")
+    share_min_group = sharing.get("min_group_size")
+    if not isinstance(share_min_group, int) or share_min_group < 2:
+        raise ConfigError("sharing.min_group_size 必须是 >=2 的整数")
+    share_route = sharing.get("route")
+    if share_route not in {"suppress", "interval"}:
+        raise ConfigError("sharing.route 只能是 suppress 或 interval")
+    export_name = _require(sharing, "export_dir", str, "sharing")
+    export_dir = _resolve(base, str(Path(out_value) / export_name))
+    if export_dir == scan_root or scan_root in export_dir.parents:
+        raise ConfigError("共享导出目录不得位于扫描源目录内，以保护源文件")
 
     sidecar_root_value = scan.get("sidecar_root")
     sidecar_root: Path | None = None
@@ -240,6 +265,10 @@ def load_config(path: str | Path) -> Config:
         control_ratio_threshold=float(cr_threshold),
         web_host=host,
         web_port=port,
+        share_audit_contact=share_contact,
+        share_min_group_size=share_min_group,
+        share_route=share_route,
+        export_dir=export_dir,
         raw=raw,
         fingerprint=fingerprint,
     )

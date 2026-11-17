@@ -137,6 +137,41 @@ def build_manifest(
     }
 
 
+def build_internal_rows(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """从内部 manifest 提取统一投影的输入行（仅供本机使用）。
+
+    这些行包含路径与哈希等敏感字段，是 local_forensic 与 share_review
+    两种合同投影的共同输入；共享视图只会从显式允许清单重新构造，
+    不会直接透出本函数返回的字段。
+    """
+    rows: list[dict[str, Any]] = []
+    for item in manifest["files"]:
+        decision = item["decision"]
+        warnings = item["warnings"]
+        rows.append(
+            {
+                "rel_path": item["rel_path"],
+                "encoding": decision["encoding"],
+                "confidence": decision["confidence"],
+                "method": decision["method"],
+                "conflict": bool(decision["conflicts"]),
+                "error_codes": list(decision["error_codes"]),
+                "transcode_success": bool(item["transcode"]["success"]),
+                "output_rel_path": item["transcode"]["output_rel_path"],
+                "output_sha256": item["transcode"]["output_sha256"],
+                "risk_level": item["mojibake"]["level"],
+                "warning_count": item["warning_count"],
+                "warning_codes": sorted({str(row["code"]) for row in warnings}),
+                "warning_details": [
+                    {"code": str(row["code"]), "severity": str(row["severity"])}
+                    for row in warnings
+                ],
+            }
+        )
+    rows.sort(key=lambda row: str(row["rel_path"]))
+    return rows
+
+
 def write_manifest(config: Config, manifest: dict[str, Any]) -> Path:
     write_json(config.manifest_path, manifest)
     return config.manifest_path

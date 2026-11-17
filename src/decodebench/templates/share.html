@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>共享视图预览 · 批次 {{ batch.batch_id }} · 采文解码台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main>
+  <nav>
+    <a href="{{ url_for('index') }}">批次列表</a>
+    <span>/</span><a href="{{ url_for('batch_detail', batch_id=batch.batch_id) }}">批次 {{ batch.batch_id }}</a>
+  </nav>
+  <header>
+    <p class="eyebrow">share_review preview / read only</p>
+    <h1>受控共享视图预览</h1>
+    <p class="lede">本页模拟 share_review 合同下外部复核者可见的内容。文件代号为本次预览临时生成，每次刷新都会变化，不同预览、不同导出之间默认不可关联。</p>
+  </header>
+
+  <section class="stats">
+    <div><strong>{{ view.summary.files_total }}</strong><span>文件总数</span></div>
+    <div><strong>{{ view.summary.transcode_success }}</strong><span>转码成功</span></div>
+    <div><strong>{{ view.disclosure.protected_files }}</strong><span>受保护文件</span></div>
+    <div><strong>{{ view.disclosure.route }}</strong><span>发布路线</span></div>
+  </section>
+
+  <section class="panel">
+    <h2>文件决策（匿名代号）</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>文件代号</th><th>编码</th><th>置信区间</th><th>方法</th><th>转码</th><th>风险</th><th>警告数</th><th>冲突</th></tr>
+        </thead>
+        <tbody>
+        {% for item in view.files %}
+          <tr>
+            <td class="mono">{{ item.file_token }}</td>
+            <td>{{ item.encoding }}</td>
+            <td>{{ item.confidence_band }}</td>
+            <td>{{ item.method }}</td>
+            <td>{{ "成功" if item.transcode_success else "失败" }}</td>
+            <td>{{ item.risk_level|sharecell }}</td>
+            <td class="num">{{ item.warning_count|sharecell }}</td>
+            <td>{{ item.conflict|sharecell }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="8" class="empty">本批次没有文件。</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>汇总发布状态</h2>
+    <dl class="facts">
+      <dt>冲突文件数</dt><dd>{{ view.summary.conflict_files|sharecell }}</dd>
+      <dt>含警告文件数</dt><dd>{{ view.summary.files_with_warnings|sharecell }}</dd>
+      <dt>警告总数</dt><dd>{{ view.summary.warnings_total|sharecell }}</dd>
+      <dt>风险分布</dt>
+      <dd>
+        {% if view.summary.risk_distribution is string %}
+          {{ view.summary.risk_distribution|sharecell }}
+        {% else %}
+          {% for cell in view.summary.risk_distribution %}{{ cell.level }}={{ cell.count|sharecell }}{{ "，" if not loop.last }}{% endfor %}
+        {% endif %}
+      </dd>
+      <dt>警告分布</dt>
+      <dd>
+        {% if view.summary.warning_distribution is string %}
+          {{ view.summary.warning_distribution|sharecell }}
+        {% elif view.summary.warning_distribution %}
+          {% for cell in view.summary.warning_distribution %}{{ cell.code }}={{ cell.count|sharecell }}{{ "，" if not loop.last }}{% endfor %}
+        {% else %}
+          无
+        {% endif %}
+      </dd>
+    </dl>
+  </section>
+
+  <section class="panel">
+    <h2>披露说明</h2>
+    <dl class="facts">
+      <dt>审计联系</dt><dd>{{ view.audit_contact }}</dd>
+      <dt>最小组样本量</dt><dd>k={{ view.disclosure.min_group_size }}</dd>
+      <dt>保留结论</dt><dd>{{ view.disclosure.retained_conclusions|join("；") }}</dd>
+      {% if view.disclosure.undeterminable_conclusions %}
+      <dt>无法判断</dt><dd>{{ view.disclosure.undeterminable_conclusions|join("；") }}</dd>
+      {% endif %}
+    </dl>
+    <p class="empty">共享视图不包含路径、哈希、证据片段、精确时间戳或内部输出位置；代号映射表不随包发布。</p>
+  </section>
+</main>
+</body>
+</html>

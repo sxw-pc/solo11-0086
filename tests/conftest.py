@@ -129,3 +129,79 @@ def fixture_hashes_map():
 @pytest.fixture
 def manifest_reader():
     return load_json_manifest
+
+
+# ---------------------------------------------------------------------------
+# 共享导出测试的合成输入与读取助手
+# ---------------------------------------------------------------------------
+
+
+def write_utf8_html(path: Path, body: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        '<!doctype html>\n<html><head><meta charset="utf-8"><title>t</title></head>'
+        f"<body><p>{body}</p></body></html>",
+        encoding="utf-8",
+    )
+
+
+def alice_root(tmp_path: Path) -> Path:
+    """cases/alice.html 带 Alice-ID 正文与唯一 high 乱码；另两份干净响应。"""
+    root = tmp_path / "responses"
+    write_utf8_html(
+        root / "cases" / "alice.html", "员工编号 Alice-ID 的页面出现典型乱码 æ˜¯ 需要复核"
+    )
+    write_utf8_html(root / "cases" / "bob.html", "完全正常的页面内容，没有乱码。")
+    write_utf8_html(root / "cases" / "carol.html", "另一份完全正常的页面内容。")
+    return root
+
+
+def two_file_root(tmp_path: Path) -> Path:
+    """一份可从公开编码特征识别为无乱码，另一份存在唯一 high 乱码。"""
+    root = tmp_path / "responses"
+    write_utf8_html(root / "one.html", "干净页面，编码声明与字节一致。")
+    write_utf8_html(root / "two.html", "这一份含有典型乱码序列 æ˜¯ 需要复核。")
+    return root
+
+
+def normal_root(tmp_path: Path) -> Path:
+    """每个敏感画像组样本量都 >=2 的正常批次。"""
+    root = tmp_path / "responses"
+    write_utf8_html(root / "clean_a.html", "完全正常的页面内容甲。")
+    write_utf8_html(root / "clean_b.html", "完全正常的页面内容乙。")
+    write_utf8_html(root / "q_a.html", "状态正常 ??? 结束甲")
+    write_utf8_html(root / "q_b.html", "状态正常 ??? 结束乙")
+    return root
+
+
+def run_batch(make_config, root: Path):
+    import json as _json
+
+    from decodebench.pipeline import run
+
+    config = make_config(scan_root=root)
+    result = run(config, NOW)
+    manifest = _json.loads(config.manifest_path.read_text(encoding="utf-8"))
+    return config, result, manifest
+
+
+def export_package(config, directory: Path, **kwargs):
+    """调用 build_export 并读回四种格式的文本与 JSON 视图。"""
+    import json as _json
+
+    from decodebench.sharing import build_export
+
+    kwargs.setdefault("contract", "share_review")
+    kwargs.setdefault("now", NOW)
+    kwargs["output_dir"] = str(directory)
+    result = build_export(config, **kwargs)
+    package = Path(result["package_dir"])
+    stem = "share" if kwargs["contract"] == "share_review" else "forensic"
+    texts = {
+        name: (package / f"{stem}{suffix}").read_text(encoding="utf-8")
+        for name, suffix in (
+            ("json", ".json"), ("md", ".md"), ("html", ".html"),
+            ("schema", "_schema.json"),
+        )
+    }
+    return result, _json.loads(texts["json"]), texts

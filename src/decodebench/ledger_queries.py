@@ -6,6 +6,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from .ledger import summarize_batch
+
 
 def _connect_readonly(db_path: Path) -> sqlite3.Connection:
     uri = db_path.resolve().as_uri() + "?mode=ro"
@@ -46,6 +48,22 @@ def get_batch(db_path: Path, batch_id: str) -> dict[str, Any] | None:
             "SELECT * FROM batches WHERE batch_id = ?", (batch_id,)
         ).fetchone()
         return _dict(row)
+    finally:
+        connection.close()
+
+
+def batch_summary(db_path: Path, batch_id: str) -> dict[str, Any] | None:
+    """只读重建某批次的台账摘要（与 record_batch 返回结构一致）。"""
+    if not db_path.is_file():
+        return None
+    connection = _connect_readonly(db_path)
+    try:
+        exists = connection.execute(
+            "SELECT 1 FROM batches WHERE batch_id = ?", (batch_id,)
+        ).fetchone()
+        if exists is None:
+            return None
+        return summarize_batch(connection, batch_id)
     finally:
         connection.close()
 

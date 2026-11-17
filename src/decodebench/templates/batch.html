@@ -8,7 +8,7 @@
 </head>
 <body>
 <main>
-  <nav><a href="{{ url_for('index') }}">← 批次列表</a></nav>
+  <nav><a href="{{ url_for('index') }}">← 批次列表</a> <a href="{{ url_for('batch_share', batch_id=batch.batch_id) }}">共享视图预览</a></nav>
   <header>
     <p class="eyebrow">batch / {{ batch.status }}</p>
     <h1>批次 {{ batch.batch_id }}</h1>

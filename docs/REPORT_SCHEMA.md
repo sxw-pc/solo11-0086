@@ -162,3 +162,10 @@ out/
 - 浮点比例和置信度固定六位小数。
 - `report.json`、`report.md`、`report.html` 与 `manifest.json` 不包含 SQLite 自增 ID、`run_count`、`updated_at` 等易变字段。
 - 固定 `--now` 后，同一输入与配置的 manifest 与三份报告应字节稳定；`decodebench.sqlite3` 的物理文件不承诺字节稳定。
+
+## 6. 受控共享视图
+
+`report.*` 与 manifest 属于 local_forensic 合同。`decodebench export`
+可按 share_review 合同导出匿名化共享包（`share.json/md/html` +
+`share_schema.json`），其字段允许清单、抑制字段、导出身份与联合发布
+检查规则见 [SHARING.md](SHARING.md)。

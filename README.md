@@ -56,6 +56,22 @@ python -m decodebench pipeline --config configs/demo.yml --now 2024-01-01T00:00:
 python -m decodebench serve --config configs/demo.yml
 ```
 
+## 受控共享导出
+
+对外分享结果时不要直接发出 `report.*` 或 manifest，而是按使用合同导出：
+
+```bash
+# 外部复核者的受控共享视图（匿名代号 + 联合发布检查）
+python -m decodebench export --config configs/demo.yml --contract share_review
+
+# 获授权本地审计员的完整取证包（路径、哈希、片段、精确计数）
+python -m decodebench export --config configs/demo.yml --contract local_forensic
+```
+
+共享视图从显式允许清单构造，敏感维度经行级+汇总联合发布检查
+（`--route suppress|interval`、`--min-group-size`），详见
+[docs/SHARING.md](docs/SHARING.md)。
+
 也可以使用：
 
 ```bash

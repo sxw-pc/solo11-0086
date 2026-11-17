@@ -100,7 +100,106 @@ def _ledger_table(ledger: dict[str, Any]) -> str:
     )
 
 
+def _share_cell(value: object) -> str:
+    if isinstance(value, dict) and "min" in value and "max" in value:
+        return _text(f"{value['min']}–{value['max']}")
+    if value == "suppressed":
+        return '<span class="tag">已抑制</span>'
+    if isinstance(value, list):
+        return _text(", ".join(str(item) for item in value) or "无")
+    if value is True:
+        return "是"
+    if value is False:
+        return "否"
+    return _text(value)
+
+
+def _share_table(headers: tuple[str, ...], rows: list[list[str]], empty: str) -> str:
+    head = "".join(f"<th>{_text(item)}</th>" for item in headers)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>" for row in rows
+    )
+    if not body:
+        body = f'<tr><td colspan="{len(headers)}">{_text(empty)}</td></tr>'
+    return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+
+
+def _share_distribution(title: str, distribution: Any, first_header: str) -> str:
+    if isinstance(distribution, str):
+        return f"<h2>{_text(title)}</h2>\n<p class=\"meta\">已抑制：低样本组联合发布检查未通过，精确分布不发布。</p>"
+    rows = [
+        [_text(item.get("level") or item.get("method") or item.get("code")),
+         _share_cell(item["count"])]
+        for item in distribution
+    ]
+    return f"<h2>{_text(title)}</h2>" + _share_table((first_header, "数量"), rows, "无")
+
+
+def render_shared_html(view: dict[str, Any]) -> str:
+    summary = view["summary"]
+    disclosure = view["disclosure"]
+    summary_rows = [
+        [_text(label), _share_cell(summary[key])]
+        for label, key in (
+            ("文件总数", "files_total"), ("转码成功数", "transcode_success"),
+            ("转码失败数", "transcode_failed"), ("冲突文件数", "conflict_files"),
+            ("含警告文件数", "files_with_warnings"), ("警告总数", "warnings_total"),
+        )
+    ]
+    file_rows = [
+        [
+            _text(item["file_token"]), _text(item["encoding"]),
+            _text(item["confidence_band"]), _text(item["method"]),
+            "成功" if item["transcode_success"] else "失败",
+            _share_cell(item["risk_level"]), _share_cell(item["warning_count"]),
+            _share_cell(item["conflict"]),
+        ]
+        for item in view["files"]
+    ]
+    retained = "".join(f"<li>{_text(item)}</li>" for item in disclosure["retained_conclusions"])
+    hidden = "".join(
+        f"<li>{_text(item)}</li>" for item in disclosure["undeterminable_conclusions"]
+    )
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>采文解码台受控共享视图</title>
+<style>{STYLE}</style>
+</head>
+<body>
+<main>
+<h1>采文解码台受控共享视图</h1>
+<p class="meta">合同：{_text(view['contract'])}　导出 ID：{_text(view['export_id'])}</p>
+<p class="meta">生成时间：{_text(view['generated_at'])}　规则版本：{_text(view['rule_version'])}</p>
+<p class="meta">审计联系：{_text(view['audit_contact'])}　发布路线：{_text(disclosure['route'])}（最小组样本量 k={_text(disclosure['min_group_size'])}）</p>
+<h2>摘要</h2>
+{_share_table(("指标", "数值"), summary_rows, "无")}
+{_share_distribution('方法分布', summary['method_distribution'], '方法')}
+{_share_distribution('风险分布', summary['risk_distribution'], '等级')}
+{_share_distribution('警告分布', summary['warning_distribution'], '错误码')}
+<h2>文件决策明细（匿名代号）</h2>
+{_share_table(("文件代号", "编码", "置信区间", "方法", "转码", "风险", "警告数", "冲突"), file_rows, "无文件")}
+<h2>披露说明</h2>
+<p class="meta">可见逐文件字段：{_text(', '.join(disclosure['visible_file_fields']))}</p>
+<p class="meta">抑制的内部字段：{_text(', '.join(disclosure['suppressed_internal_fields']))}</p>
+<h2>保留结论</h2>
+<ul>{retained}</ul>
+<h2>无法从共享数据判断</h2>
+<ul>{hidden}</ul>
+<p class="meta">{_text(disclosure['token_note'])}</p>
+<p class="meta">{_text(disclosure['mapping_note'])}</p>
+<footer>本共享视图不包含路径、哈希、证据片段、精确时间戳或内部输出位置；无外部资源，不发起网络请求。</footer>
+</main>
+</body>
+</html>
+"""
+
+
 def render_html(report: dict[str, Any]) -> str:
+    if report.get("contract") == "share_review":
+        return render_shared_html(report)
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
