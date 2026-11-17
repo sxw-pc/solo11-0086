@@ -37,6 +37,11 @@ mojibake:
   question_run_threshold: 3
   control_ratio_threshold: 0.01
 
+assembly:
+  contract: "off"
+  priority_capture_ids: []
+  max_combinations_per_entity: 256
+
 web:
   host: 127.0.0.1
   port: 5017

@@ -67,6 +67,44 @@ CREATE TABLE IF NOT EXISTS warnings (
     byte_offset INTEGER,
     snippet TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS entities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id TEXT NOT NULL REFERENCES batches(batch_id),
+    entity_key TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    complete INTEGER NOT NULL,
+    entity_size INTEGER,
+    capture_id TEXT,
+    assembled_sha256 TEXT,
+    final_encoding TEXT,
+    confidence REAL,
+    method TEXT,
+    transcode_success INTEGER NOT NULL DEFAULT 0,
+    output_rel_path TEXT,
+    output_utf8_sha256 TEXT,
+    conflict_offset INTEGER,
+    conflict_json TEXT NOT NULL,
+    excluded_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(entity_key)
+);
+CREATE TABLE IF NOT EXISTS entity_fragments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_id_row INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    rel_path TEXT NOT NULL,
+    capture_id TEXT NOT NULL,
+    byte_start INTEGER NOT NULL,
+    byte_end_inclusive INTEGER NOT NULL,
+    entity_size INTEGER NOT NULL,
+    validator TEXT NOT NULL,
+    source_sha256 TEXT NOT NULL,
+    fragment_sha256 TEXT,
+    status TEXT NOT NULL,
+    consumed INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_files_batch ON files(batch_id, rel_path);
 CREATE INDEX IF NOT EXISTS idx_evidence_file ON evidence(file_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_warnings_file ON warnings(file_id, code);

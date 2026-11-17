@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,8 @@ def build_config(
     rewrite: bool = True,
     host: str = "127.0.0.1",
     port: int = 5017,
+    extensions: list[str] | None = None,
+    assembly: dict[str, Any] | None = None,
 ) -> Config:
     config_dir = tmp_path / "configs"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -45,7 +48,8 @@ def build_config(
     data: dict[str, Any] = {
         "scan": {
             "root": str(source),
-            "extensions": [".html", ".htm", ".xml", ".txt", ".css"],
+            "extensions": extensions
+            or [".html", ".htm", ".xml", ".txt", ".css"],
             "sidecar_suffix": ".headers.json",
             "sidecar_root": str(sidecars.resolve()) if sidecars else None,
         },
@@ -75,6 +79,8 @@ def build_config(
         "mojibake": {"question_run_threshold": 3, "control_ratio_threshold": 0.01},
         "web": {"host": host, "port": port},
     }
+    if assembly is not None:
+        data["assembly"] = assembly
     path = config_dir / "demo.yml"
     path.write_text(
         yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
@@ -86,6 +92,64 @@ def build_config(
 @pytest.fixture
 def make_config(tmp_path):
     return lambda **kwargs: build_config(tmp_path, **kwargs)
+
+
+@pytest.fixture
+def fragment_dir(tmp_path):
+    """返回按名字写入响应与 sidecar 的工厂；sidecar 位于独立目录。"""
+    responses = tmp_path / "responses"
+    sidecars = tmp_path / "sidecars"
+    responses.mkdir()
+    sidecars.mkdir()
+
+    def write(
+        name: str,
+        data: bytes,
+        fragment: dict[str, Any] | None = None,
+        *,
+        headers: dict[str, Any] | None = None,
+        sidecar_extra: dict[str, Any] | None = None,
+    ) -> Path:
+        payload = data
+        (responses / name).write_bytes(payload)
+        sidecar: dict[str, Any] = {"headers": headers or {}}
+        if fragment is not None:
+            sidecar.update(fragment)
+        if sidecar_extra is not None:
+            sidecar.update(sidecar_extra)
+        (sidecars / (name + ".headers.json")).write_text(
+            json.dumps(sidecar, ensure_ascii=False), encoding="utf-8"
+        )
+        return responses / name
+
+    write.responses = responses  # type: ignore[attr-defined]
+    write.sidecars = sidecars  # type: ignore[attr-defined]
+    return write
+
+
+@pytest.fixture
+def assemble_config(tmp_path, make_config):
+    def build(
+        responses: Path,
+        sidecars: Path,
+        *,
+        contract: str = "consensus",
+        priority: list[str] | None = None,
+        extensions: list[str] | None = None,
+        max_combinations: int = 256,
+    ) -> Config:
+        return make_config(
+            scan_root=responses,
+            sidecar_root=sidecars,
+            extensions=extensions or [".bin", ".txt", ".html", ".part"],
+            assembly={
+                "contract": contract,
+                "priority_capture_ids": priority or [],
+                "max_combinations_per_entity": max_combinations,
+            },
+        )
+
+    return build
 
 
 @pytest.fixture

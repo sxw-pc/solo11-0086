@@ -162,6 +162,31 @@ def collect_evidence(source: SourceFile, raw: bytes, config: Config) -> list[Evi
     return evidence
 
 
+def collect_assembled_evidence(
+    source: SourceFile,
+    raw: bytes,
+    config: Config,
+    note: str,
+) -> list[Evidence]:
+    """只在已选定的完整组装字节上解释 BOM/头/文档声明。
+
+    片段末尾被截断的多字节序列不参与解码，因此这里不会把片段边界误报为
+    编码失败；额外的 `assembly` 证据只描述逻辑实体身份。
+    """
+    evidence = [
+        Evidence(
+            source="assembly",
+            declared=None,
+            offset=None,
+            line=None,
+            note=note,
+        )
+    ]
+    evidence.extend(collect_evidence(source, raw, config))
+    return evidence
+
+
+
 def declaration_values(evidence: list[Evidence], source: str) -> list[Evidence]:
     return [item for item in evidence if item.source == source and item.declared]
 
@@ -177,7 +202,9 @@ def all_declared(evidence: list[Evidence]) -> list[Evidence]:
 
 def apply_decision_matches(evidence: list[Evidence], decision_encoding: str) -> None:
     for item in evidence:
-        if item.source == "fallback":
+        if item.source == "assembly":
+            item.matches_decision = None
+        elif item.source == "fallback":
             item.matches_decision = compatible_encoding(item.declared, decision_encoding)
         elif item.declared:
             item.matches_decision = compatible_encoding(item.declared, decision_encoding)

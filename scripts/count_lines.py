@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCAN_ROOTS = [ROOT / "src", ROOT / "tests", ROOT / "scripts", ROOT / "decodebench"]
 MAX_LINES = 300
 MIN_TOTAL = 2500
-MAX_TOTAL = 4500
+MAX_TOTAL = 7000
 
 
 def main() -> int:

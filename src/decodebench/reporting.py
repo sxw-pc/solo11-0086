@@ -36,8 +36,36 @@ def build_report(
             }
         )
     files.sort(key=lambda row: str(row["rel_path"]))
+    assembly = manifest.get("assembly", {})
+    entities = [
+        {
+            "entity_id": item["entity_id"],
+            "status": item["status"],
+            "complete": item["complete"],
+            "capture_id": item["capture_id"],
+            "entity_size": item["entity_size"],
+            "assembled_sha256": item["assembled_sha256"],
+            "encoding": (item.get("decision") or {}).get("encoding"),
+            "transcode_success": bool((item.get("transcode") or {}).get("success")),
+            "output_rel_path": (item.get("transcode") or {}).get("output_rel_path"),
+            "output_sha256": (item.get("transcode") or {}).get("output_sha256"),
+            "fragments": [
+                {
+                    "rel_path": fragment["rel_path"],
+                    "capture_id": fragment["capture_id"],
+                    "byte_start": fragment["byte_start"],
+                    "byte_end_inclusive": fragment["byte_end_inclusive"],
+                    "sha256": fragment["sha256"],
+                }
+                for fragment in item["fragments"]
+            ],
+            "conflict": item["conflict"],
+            "excluded": item["excluded"],
+        }
+        for item in assembly.get("entities", [])
+    ]
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "project": "decodebench",
         "generated_at": now,
         "rule_version": RULE_VERSION,
@@ -45,6 +73,11 @@ def build_report(
         "batch_id": ledger_summary["batch_id"],
         "scan_root": manifest["scan_root"],
         "summary": manifest["summary"],
+        "assembly": {
+            "contract": assembly.get("contract"),
+            "summary": assembly.get("summary", {}),
+            "entities": entities,
+        },
         "warning_distribution": manifest["summary"]["warning_distribution"],
         "files": files,
         "ledger": ledger_summary,
@@ -116,6 +149,34 @@ def render_markdown(report: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
+            "## 逻辑实体组装",
+            "",
+            "| 实体 | 合同 | 状态 | 捕获 | 组装 SHA-256 | 编码 | 转码 | 片段 |",
+            "| --- | --- | --- | --- | --- | --- | --- | ---: |",
+        ]
+    )
+    assembly = report.get("assembly", {})
+    entities = assembly.get("entities", [])
+    if entities:
+        for item in entities:
+            lines.append(
+                "| {entity} | {contract} | {status} | {capture} | {sha} | {encoding} | "
+                "{transcode} | {fragments} |".format(
+                    entity=_cell(item["entity_id"]),
+                    contract=_cell(assembly.get("contract")),
+                    status=_cell(item["status"]),
+                    capture=_cell(item["capture_id"]),
+                    sha=_cell(item["assembled_sha256"]),
+                    encoding=_cell(item["encoding"]),
+                    transcode="成功" if item["transcode_success"] else "未发布",
+                    fragments=len(item["fragments"]),
+                )
+            )
+    else:
+        lines.append("| 无 | - | - | - | - | - | - | 0 |")
+    lines.extend(
+        [
+            "",
             "## SQLite 台账摘要",
             "",
             "| 表/指标 | 数值 |",
@@ -126,6 +187,8 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"| 证据行 | {ledger['evidence_rows']} |",
             f"| 决策行 | {ledger['decision_rows']} |",
             f"| 警告行 | {ledger['warning_rows']} |",
+            f"| 实体行 | {ledger.get('entities_in_batch', 0)} |",
+            f"| 实体片段行 | {ledger.get('entity_fragment_rows', 0)} |",
             f"| files 表总行数 | {ledger['files_table_total']} |",
             f"| batches 表总行数 | {ledger['batches_table_total']} |",
             "",

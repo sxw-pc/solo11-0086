@@ -83,6 +83,29 @@ def _file_table(report: dict[str, Any]) -> str:
     return "".join(rows)
 
 
+def _entity_table(report: dict[str, Any]) -> str:
+    assembly = report.get("assembly", {})
+    entities = assembly.get("entities", [])
+    if not entities:
+        return '<tr><td colspan="7">无逻辑实体</td></tr>'
+    rows: list[str] = []
+    for item in entities:
+        conflict = '<span class="tag">是</span>' if item.get("conflict") else "否"
+        rows.append(
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td>"
+            "<td>{}</td><td>{}</td><td>{}</td></tr>".format(
+                _text(item["entity_id"]),
+                _text(assembly.get("contract")),
+                _text(item["status"]),
+                _text(item["capture_id"]),
+                _text(item["assembled_sha256"]),
+                _text(item["encoding"]),
+                conflict,
+            )
+        )
+    return "".join(rows)
+
+
 def _ledger_table(ledger: dict[str, Any]) -> str:
     labels = (
         ("批内文件", "files_in_batch"),
@@ -91,11 +114,13 @@ def _ledger_table(ledger: dict[str, Any]) -> str:
         ("证据行", "evidence_rows"),
         ("决策行", "decision_rows"),
         ("警告行", "warning_rows"),
+        ("实体行", "entities_in_batch"),
+        ("实体片段行", "entity_fragment_rows"),
         ("files 表总行数", "files_table_total"),
         ("batches 表总行数", "batches_table_total"),
     )
     return "".join(
-        f"<tr><td>{_text(label)}</td><td class=\"num\">{_text(ledger[key])}</td></tr>"
+        f"<tr><td>{_text(label)}</td><td class=\"num\">{_text(ledger.get(key, 0))}</td></tr>"
         for label, key in labels
     )
 
@@ -128,6 +153,12 @@ def render_html(report: dict[str, Any]) -> str:
 <thead><tr><th>相对路径</th><th>编码</th><th class="num">置信度</th><th>方法</th>
 <th>冲突</th><th>转码</th><th>风险</th><th class="num">警告</th></tr></thead>
 <tbody>{_file_table(report)}</tbody>
+</table>
+<h2>逻辑实体组装</h2>
+<table>
+<thead><tr><th>实体</th><th>合同</th><th>状态</th><th>捕获</th>
+<th>组装 SHA-256</th><th>编码</th><th>冲突</th></tr></thead>
+<tbody>{_entity_table(report)}</tbody>
 </table>
 <h2>SQLite 台账摘要</h2>
 <table>

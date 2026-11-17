@@ -10,6 +10,7 @@ from typing import Any
 
 from . import RULE_VERSION
 from .config import Config
+from .ledger_entities import assembly_identity, entity_counts, upsert_entities
 from .ledger_schema import SCHEMA
 
 
@@ -34,11 +35,15 @@ def initialize(db_path: Path) -> None:
         connection.close()
 
 
-def _batch_identity(files: list[dict[str, Any]], config: Config) -> tuple[str, str]:
+def _batch_identity(
+    files: list[dict[str, Any]], config: Config, assembly_key: str = ""
+) -> tuple[str, str]:
     parts = sorted(
         f"{idempotency_key(str(item['source_sha256']), config.fingerprint)}|{item['rel_path']}"
         for item in files
     )
+    if assembly_key:
+        parts.append(f"assembly:{assembly_key}")
     source = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
     batch_key = hashlib.sha256(source.encode("utf-8")).hexdigest()
     return batch_key, batch_key[:20]
@@ -230,6 +235,7 @@ def _ledger_summary(connection: sqlite3.Connection, batch_id: str) -> dict[str, 
         """,
         (batch_id,),
     ).fetchone()["n"]
+    entity_totals = entity_counts(connection, batch_id)
     return {
         "batch_id": batch_id,
         "files_in_batch": int(file_count),
@@ -238,6 +244,7 @@ def _ledger_summary(connection: sqlite3.Connection, batch_id: str) -> dict[str, 
         "evidence_rows": int(evidence_rows),
         "decision_rows": int(file_count),
         "warning_rows": int(warning_rows),
+        **entity_totals,
         "files_table_total": int(
             connection.execute("SELECT COUNT(*) AS n FROM files").fetchone()["n"]
         ),
@@ -251,7 +258,9 @@ def record_batch(config: Config, manifest: dict[str, Any], now: str) -> dict[str
     """幂等写入一个批次；相同 key 只更新既有批次与文件。"""
     initialize(config.db_path)
     files = manifest["files"]
-    batch_key, batch_id = _batch_identity(files, config)
+    assembly = manifest.get("assembly", {})
+    assembly_key = assembly_identity(assembly)
+    batch_key, batch_id = _batch_identity(files, config, assembly_key)
     conflict_count = sum(1 for item in files if item["decision"]["conflicts"])
     transcoded_count = sum(1 for item in files if item["transcode"]["success"])
     connection = _connect(config.db_path)
@@ -269,6 +278,7 @@ def record_batch(config: Config, manifest: dict[str, Any], now: str) -> dict[str
             )
             for item in files:
                 _upsert_file(connection, batch_id, item, config, now)
+            upsert_entities(connection, batch_id, assembly, now)
         return _ledger_summary(connection, batch_id)
     finally:
         connection.close()

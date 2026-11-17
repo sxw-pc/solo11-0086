@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-import hashlib
+import copy
 import ipaddress
-import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from . import RULE_VERSION
+from .assembly_config import (
+    ASSEMBLY_DEFAULTS,
+    AssemblyConfigError,
+    fingerprint as config_fingerprint,
+    validate_assembly,
+)
 
 
 class ConfigError(ValueError):
@@ -48,6 +52,7 @@ DEFAULTS: dict[str, Any] = {
     "transcode": {"rewrite_declarations": True, "errors": "strict"},
     "mojibake": {"question_run_threshold": 3, "control_ratio_threshold": 0.01},
     "web": {"host": "127.0.0.1", "port": 5017},
+    "assembly": ASSEMBLY_DEFAULTS,
 }
 
 
@@ -73,6 +78,9 @@ class Config:
     control_ratio_threshold: float
     web_host: str
     web_port: int
+    assembly_contract: str
+    assembly_priority_capture_ids: tuple[str, ...]
+    assembly_max_combinations: int
     raw: dict[str, Any]
     fingerprint: str
 
@@ -116,6 +124,35 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
+def with_assembly(
+    config: Config, contract: str, priority_capture_ids: tuple[str, ...]
+) -> Config:
+    """命令行覆盖组装合同时，重建配置指纹以保持幂等键可区分。"""
+    try:
+        _, _, _ = validate_assembly(
+            {
+                "contract": contract,
+                "priority_capture_ids": list(priority_capture_ids),
+                "max_combinations_per_entity": config.assembly_max_combinations,
+            }
+        )
+    except AssemblyConfigError as exc:
+        raise ConfigError(str(exc)) from exc
+    raw = dict(config.raw)
+    raw["assembly"] = {
+        "contract": contract,
+        "priority_capture_ids": list(priority_capture_ids),
+        "max_combinations_per_entity": config.assembly_max_combinations,
+    }
+    return replace(
+        config,
+        assembly_contract=contract,
+        assembly_priority_capture_ids=priority_capture_ids,
+        raw=raw,
+        fingerprint=config_fingerprint(raw),
+    )
+
+
 def load_config(path: str | Path) -> Config:
     config_path = Path(path).resolve()
     if not config_path.is_file():
@@ -126,7 +163,7 @@ def load_config(path: str | Path) -> Config:
         raise ConfigError(f"配置读取失败: {exc}") from exc
     if not isinstance(loaded, dict):
         raise ConfigError("配置根节点必须是 YAML 映射")
-    raw = _merge(DEFAULTS, loaded)
+    raw = _merge(copy.deepcopy(DEFAULTS), loaded)
     scan = _require(raw, "scan", dict, "配置")
     output = _require(raw, "output", dict, "配置")
     detection = _require(raw, "detection", dict, "配置")
@@ -207,17 +244,15 @@ def load_config(path: str | Path) -> Config:
         raise ConfigError("web.host 必须是回环地址，复核台拒绝对外监听")
     if not isinstance(port, int) or not 1 <= port <= 65535:
         raise ConfigError("web.port 必须是 1-65535 的整数")
+    try:
+        contract, priority_ids, max_combinations = validate_assembly(
+            raw.get("assembly", {})
+        )
+    except AssemblyConfigError as exc:
+        raise ConfigError(str(exc)) from exc
     suffix = scan.get("sidecar_suffix")
     if not isinstance(suffix, str) or not suffix:
         raise ConfigError("scan.sidecar_suffix 必须是非空字符串")
-
-    fingerprint_source = json.dumps(
-        {"config": raw, "rule": RULE_VERSION},
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    fingerprint = hashlib.sha256(fingerprint_source).hexdigest()
 
     return Config(
         config_path=config_path,
@@ -240,6 +275,9 @@ def load_config(path: str | Path) -> Config:
         control_ratio_threshold=float(cr_threshold),
         web_host=host,
         web_port=port,
+        assembly_contract=contract,
+        assembly_priority_capture_ids=tuple(priority_ids),
+        assembly_max_combinations=max_combinations,
         raw=raw,
-        fingerprint=fingerprint,
+        fingerprint=config_fingerprint(raw),
     )

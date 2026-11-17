@@ -56,6 +56,17 @@ python -m decodebench pipeline --config configs/demo.yml --now 2024-01-01T00:00:
 python -m decodebench serve --config configs/demo.yml
 ```
 
+分段响应的离线组装用独立子命令：
+
+```bash
+# 仅当所有完整组合字节一致时归档；否则 ambiguous
+python -m decodebench assemble-responses --config configs/demo.yml --contract consensus
+
+# 按授权优先级选取最高优先且自身完整的捕获组
+python -m decodebench assemble-responses --config configs/demo.yml \
+  --contract authorized_capture --authorized-capture capture-blue
+```
+
 也可以使用：
 
 ```bash
@@ -78,6 +89,7 @@ make count
 - fallback 编码、候选编码、置信度阈值；
 - 转码错误策略 `strict`/`replace` 与声明重写开关；
 - mojibake 阈值；
+- 可选 `assembly` 片段组装合同（`off`/`consensus`/`authorized_capture`、授权捕获组优先级、组合预算）；
 - 复核台回环地址与端口。
 
 配置中的相对路径**相对于配置文件所在目录**解析。输出目录、报告目录和清单不得位于扫描源目录内，避免污染源证据。
@@ -107,6 +119,17 @@ out/
 5. 标准库严格解码 + 确定性统计评分。
 
 统计评分会识别“GB18030 字节却声明 UTF-8”这类冲突，并给出稳定错误码 `E_META_BYTE_CONFLICT`、`E_DECLARATION_UNDECODABLE` 与置信度。详细规则与错误码表见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
+## 分段响应组装
+
+离线采集器可能把同一文本响应分段落盘，一个 UTF-8 多字节字符可能恰好跨片段边界。逐片段猜编码会把正常实体当作乱码。`assemble-responses` 子命令只在 sidecar 用 `entity_id`、`capture_id`、`byte_start`、`byte_end_inclusive`、`entity_size`、`validator` 明确描述闭区间，且片段长度、源 SHA-256、响应身份与一致总长全部通过时，才把片段还原为一个完整字节实体，再送入现有证据与转码链。
+
+- `consensus`：所有可行的完整组合字节完全一致才自动归档，否则 `ambiguous` 且不发布正式 UTF-8。
+- `authorized_capture`：按明确优先级只取最高优先且自身完整的捕获组，其余组的冲突与排除理由保留。
+- 覆盖有洞、重叠不一致、`entity_size`/`validator` 矛盾、越界、仅前缀可读、读取期间改写、不同 `entity_id` 混组，都会得到稳定状态。
+- 候选组合超预算只报 `budget_exhausted`，不把第一个完整组说成唯一。
+
+普通未声明分段的文件仍按原逻辑逐文件处理。详细语义见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#51-片段组装offline-assemble-responses)。
 
 ## 离线 fixture
 
@@ -180,7 +203,14 @@ decodebench/
     transcoder.py
     mojibake.py
     manifest.py
+    fragments.py
+    assembly.py
+    assembly_groups.py
+    assembly_contract.py
+    assembly_records.py
+    assembly_config.py
     ledger.py
+    ledger_entities.py
     ledger_schema.py
     ledger_queries.py
     models.py
@@ -214,6 +244,9 @@ decodebench/
     test_reporting_stability.py
     test_web_readonly.py
     test_cli_pipeline.py
+    test_fragment_assembly.py
+    test_fragment_states.py
+    test_fragment_cli_ledger.py
   docs/
     ARCHITECTURE.md
     COMPLIANCE.md

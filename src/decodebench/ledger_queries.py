@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,62 @@ def _connect_readonly(db_path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(uri, uri=True)
     connection.row_factory = sqlite3.Row
     return connection
+
+
+def list_entities(db_path: Path, batch_id: str) -> list[dict[str, Any]]:
+    if not db_path.is_file():
+        return []
+    connection = _connect_readonly(db_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT id, entity_key, entity_id, status, complete, entity_size,
+                   capture_id, assembled_sha256, final_encoding, confidence,
+                   method, transcode_success, output_rel_path, output_utf8_sha256,
+                   conflict_offset, conflict_json, excluded_json
+            FROM entities
+            WHERE batch_id = ?
+            ORDER BY entity_id ASC
+            """,
+            (batch_id,),
+        ).fetchall()
+        return [_decode_json(row) for row in rows]
+    finally:
+        connection.close()
+
+
+def list_entity_fragments(
+    db_path: Path, batch_id: str, entity_id: str
+) -> list[dict[str, Any]]:
+    if not db_path.is_file():
+        return []
+    connection = _connect_readonly(db_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT f.ordinal, f.rel_path, f.capture_id, f.byte_start,
+                   f.byte_end_inclusive, f.entity_size, f.validator,
+                   f.source_sha256, f.fragment_sha256, f.status, f.consumed
+            FROM entity_fragments AS f
+            JOIN entities AS e ON e.id = f.entity_id_row
+            WHERE e.batch_id = ? AND e.entity_id = ?
+            ORDER BY f.ordinal ASC
+            """,
+            (batch_id, entity_id),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        connection.close()
+
+
+def _decode_json(row: sqlite3.Row) -> dict[str, Any]:
+    item = dict(row)
+    for source, target in (("conflict_json", "conflict"), ("excluded_json", "excluded")):
+        try:
+            item[target] = json.loads(item.pop(source) or "null")
+        except (TypeError, json.JSONDecodeError):
+            item[target] = None
+    return item
 
 
 def _dict(row: sqlite3.Row | None) -> dict[str, Any] | None:

@@ -11,7 +11,13 @@
 | 模块 | 职责 |
 | --- | --- |
 | `config.py` | 读取 YAML、合并默认值、解析路径、校验回环地址、生成配置指纹 |
-| `scanner.py` | 确定性扫描扩展名、计算 SHA-256、记录 mtime、读取 sidecar |
+| `scanner.py` | 确定性扫描扩展名、计算 SHA-256、记录 mtime、读取 sidecar 与片段声明 |
+| `fragments.py` | 校验片段声明的字节长度、源摘要、越界与响应身份，统计覆盖空洞 |
+| `assembly_groups.py` | 在单个捕获组内枚举无洞、重叠一致的完整组合，执行组合预算 |
+| `assembly_contract.py` | `consensus` 与 `authorized_capture` 两个采集合同，生成排除证据 |
+| `assembly.py` | 按 `entity_id` 组织片段并产出逻辑实体结果 |
+| `assembly_records.py` | 实体/组合/片段台账的稳定字段序列化 |
+| `assembly_config.py` | 组装合同配置的校验、指纹与 YAML `off` 归一化 |
 | `evidence.py` | 提取 BOM、HTTP 头、XML declaration、HTML meta、fallback 证据 |
 | `detectors.py` | BOM 表、编码别名、严格解码、字符比例、UTF-16 形态识别 |
 | `scorer.py` | 对严格解码结果做确定性评分与排序，选择统计获胜者 |
@@ -37,16 +43,19 @@
 ```text
 YAML config
   → load_config()（路径解析 + 配置指纹）
-  → scan()（源文件元数据 + sidecar）
-  → collect_evidence()（字节与声明证据）
+  → scan()（源文件元数据 + sidecar + 片段声明）
+  → assemble_entities()（仅对有旁证的片段：校验 → 枚举 → 合同裁决）
+  → collect_evidence()（字节与声明证据；实体只用组装后完整字节）
   → analyze_candidates()（标准库严格解码评分）
   → resolve()（优先级裁决 + 冲突 + 警告）
   → transcode()（UTF-8 输出，不覆盖源）
   → diagnose_bytes()（乱码风险，只诊断）
-  → build_manifest()（证据清单）
+  → build_manifest()（证据清单 + 实体/片段台账）
   → record_batch()（SQLite 幂等台账）
   → write_reports()（JSON/Markdown/HTML）
 ```
+
+未声明分段的普通文件仍走逐文件路径。`scan()` 只把带有六个明确字段的 sidecar 当作片段；`assembly.contract=off`（默认）时即便声明了片段也按普通文件独立处理。
 
 `--now` 固定了 manifest、数据库批次时间和报告的 `generated_at`。相同输入 + 相同配置 + 相同 `--now` 的清单与报告字节稳定。
 
@@ -65,6 +74,8 @@ YAML config
 ## 5. 证据与冲突
 
 每条证据包含 `source`、`declared`、`offset`、`line`、`matches_decision`、`note`。HTTP sidecar 证据没有字节偏移；统计证据没有单一原文位置，但附带候选排名说明。manifest 同时保留完整候选评分数组。
+
+组装实体的证据链在普通证据前额外插入一条 `assembly` 证据，说明该逻辑实体的完整字节来自哪些片段。BOM、可信 HTTP 头、XML declaration 与 HTML meta **只在选定的完整组装字节上解释**；片段末尾被截断的多字节字符不单独构成解码失败。仅当所有选中片段的 sidecar 响应头一致时，才把该头作为实体证据。
 
 冲突码对应来源：
 
@@ -91,8 +102,41 @@ YAML config
 
 冲突与警告是证据，不是自动修复指令。程序不会反复猜编码直到“看起来正常”。
 
-## 6. 幂等键与台账
+## 5.1 片段组装（offline `assemble-responses`）
 
+离线采集器可能把同一逻辑响应分段落盘，而一个 UTF-8 多字节字符可能恰好跨片段边界。逐片段猜编码会把正常实体误判为乱码，因此提供显式的组装入口 `decodebench assemble-responses --config <yaml> [--contract ...] [--authorized-capture ...]`。
+
+片段由 sidecar 的六个明确字段描述（可放在顶层或 `fragment` 子对象中）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `entity_id` | 逻辑实体身份 |
+| `capture_id` | 捕获组身份 |
+| `byte_start` | 闭区间起点（0 基） |
+| `byte_end_inclusive` | 闭区间终点（含） |
+| `entity_size` | 实体总字节数 |
+| `validator` | 实体校验说明（同一捕获组内必须一致） |
+
+校验规则（任何一条失败都以稳定状态拒绝该片段，而不是猜测）：
+
+- 片段实际字节长度必须等于 `byte_end_inclusive - byte_start + 1`；
+- 区间必须落在 `0..entity_size-1` 内，`entity_size` 必须一致；
+- 扫描时记录的源 SHA-256 必须与读取时一致，读取期间文件不得变化；
+- sidecar 若声明 `source_sha256` / `fragment_sha256`，必须与实际摘要一致；
+- 只有 `entity_id` 相同的片段才可能组成同一实体；同名文件、相同 charset 头或相同 validator 但不同 `entity_id` 不会被合并。
+
+同一 `capture_id` 内，一个"完整组合"是覆盖 `0..entity_size-1` 无洞、且重叠字节完全一致的片段集合。完整性判定与冲突证据分开处理：两个互斥的整长片段各自可构成组合，不会被强行合并；只有必须同选才能覆盖全长的冲突重叠才会让该组失败。
+
+### 两个采集合同
+
+- `consensus`：把所有可行的完整组合放在一起比较。仅当它们给出完全相同的实体字节时自动归档；否则状态为 `ambiguous`，不发布正式 UTF-8，并记录每个组合的覆盖与首个冲突字节。
+- `authorized_capture`：按 `assembly.priority_capture_ids` 的顺序，采用第一个"自身完整且内部唯一"的捕获组作为实体；其余组的冲突与排除理由完整保留。最高优先组自身不完整时顺延到下一个授权组，绝不从未授权组取字节。
+
+组合枚举有明确预算 `assembly.max_combinations_per_entity`（默认 256）。超出预算只报 `budget_exhausted`，不会把找到的第一个完整组说成唯一。
+
+实体 `rel_path` 为 `_assembled/<entity_id>.response`，只写入转码目录，不回写源。只有 `status=complete` 且转码成功的实体计入成功计数。
+
+## 6. 幂等键与台账
 文件幂等键严格由三部分组成：
 
 ```text

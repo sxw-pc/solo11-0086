@@ -12,6 +12,32 @@ def _ratio(value: float) -> float:
 
 
 @dataclass(frozen=True)
+class FragmentDecl:
+    """sidecar 中声明的一个闭区间字节片段。"""
+
+    entity_id: str
+    capture_id: str
+    byte_start: int
+    byte_end_inclusive: int
+    entity_size: int
+    validator: str
+
+    @property
+    def length(self) -> int:
+        return self.byte_end_inclusive - self.byte_start + 1
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "entity_id": self.entity_id,
+            "capture_id": self.capture_id,
+            "byte_start": self.byte_start,
+            "byte_end_inclusive": self.byte_end_inclusive,
+            "entity_size": self.entity_size,
+            "validator": self.validator,
+        }
+
+
+@dataclass(frozen=True)
 class SourceFile:
     rel_path: str
     path: Path
@@ -22,6 +48,67 @@ class SourceFile:
     sidecar_rel: str | None = None
     sidecar: dict[str, Any] = field(default_factory=dict)
     sidecar_error: str | None = None
+    fragment: FragmentDecl | None = None
+    fragment_error: str | None = None
+
+
+@dataclass
+class LoadedFragment:
+    source: SourceFile
+    decl: FragmentDecl
+    raw: bytes | None
+    sha256: str | None
+    status: str = "ok"
+    reasons: list[str] = field(default_factory=list)
+
+    @property
+    def rel_path(self) -> str:
+        return self.source.rel_path
+
+
+@dataclass
+class Combination:
+    fragments: tuple[LoadedFragment, ...]
+    coverage: tuple[tuple[int, int], ...]
+    data: bytes
+    sha256: str
+
+    @property
+    def rel_paths(self) -> tuple[str, ...]:
+        return tuple(item.rel_path for item in self.fragments)
+
+
+@dataclass
+class GroupResult:
+    capture_id: str
+    status: str
+    reasons: list[str]
+    fragments: list[LoadedFragment]
+    combinations: list[Combination]
+    overlap_conflicts: list[dict[str, Any]]
+    explored: int
+    entity_size: int = 0
+
+
+@dataclass
+class EntityResult:
+    entity_id: str
+    status: str
+    reasons: list[str]
+    entity_size: int | None
+    capture_id: str | None
+    groups: list[GroupResult]
+    fragments: list[LoadedFragment]
+    assembled: bytes | None = None
+    assembled_sha256: str | None = None
+    selected: Combination | None = None
+    excluded: list[dict[str, Any]] = field(default_factory=list)
+    conflict: dict[str, Any] | None = None
+    shared_fragments: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def complete(self) -> bool:
+        return self.status == "complete" and self.assembled is not None
 
 
 @dataclass

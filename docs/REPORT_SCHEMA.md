@@ -24,7 +24,7 @@ out/
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `schema_version` | string | 当前为 `1.0` |
+| `schema_version` | string | 当前为 `1.1` |
 | `project` | string | 固定为 `decodebench` |
 | `rule_version` | string | 规则/检测器版本 |
 | `generated_at` | string | `--now` 归一化后的 UTC ISO-8601 |
@@ -32,7 +32,22 @@ out/
 | `scan_root` | string | POSIX 风格的扫描根绝对路径 |
 | `config_snapshot` | object | 合并默认值后的 YAML 配置快照 |
 | `summary` | object | 批次汇总 |
+| `assembly` | object | 片段组装合同、实体与片段台账 |
 | `files` | array | 按 `rel_path` 升序的文件条目 |
+
+### 2.0.1 assembly
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `contract` | string | `off`、`consensus` 或 `authorized_capture` |
+| `priority_capture_ids` | array | 授权捕获组优先级 |
+| `max_combinations_per_entity` | int | 每个实体的候选组合预算 |
+| `summary` | object | 实体计数、每个完整实体的组装长度与 UTF-8 输出摘要、片段消费计数 |
+| `declaration_issues` | array | sidecar 片段声明本身有误的文件，不进入实体 |
+| `entities` | array | 逻辑实体决策、组合、排除证据，按 `entity_id` 升序 |
+| `fragments` | array | 每个原片段及其区间、来源 SHA-256 与状态 |
+
+每个实体条目同时保存 `status`（`complete`、`ambiguous`、`incomplete`、`identity_mismatch`、`budget_exhausted` 等）、`assembled_sha256`、`selected`、`excluded`、`conflict` 与 `transcode`。只有 `complete` 的实体才含编码决策与正式 UTF-8 输出；`excluded` 每项保留被排除组合的区间覆盖与首个冲突字节。`fragments` 每项记录 `byte_start`、`byte_end_inclusive`、`entity_size`、`validator`、`source_sha256`、`sha256`、`status` 与 `consumed`。
 
 ### 2.1 文件条目
 
@@ -154,6 +169,14 @@ out/
 ### warnings
 
 `id`、`file_id`、`code`、`severity`、`message`、`line_number`、`byte_offset`、`snippet`。按文件重建，不累积重复警告。
+
+### entities
+
+`id`、`batch_id`、`entity_key`（`<batch_id>|<entity_id>`）、`entity_id`、`status`、`complete`（0/1）、`entity_size`、`capture_id`、`assembled_sha256`、`final_encoding`、`confidence`、`method`、`transcode_success`、`output_rel_path`、`output_utf8_sha256`、`conflict_offset`、`conflict_json`、`excluded_json`、`created_at`、`updated_at`。`entity_key` 唯一；重复运行按 key 更新并重建片段行。
+
+### entity_fragments
+
+`id`、`entity_id_row`、`ordinal`、`rel_path`、`capture_id`、`byte_start`、`byte_end_inclusive`、`entity_size`、`validator`、`source_sha256`、`fragment_sha256`、`status`、`consumed`（0/1）。每个原片段都保留一条，无论是否被选中。
 
 ## 5. 确定性约定
 
