@@ -100,6 +100,93 @@ def _ledger_table(ledger: dict[str, Any]) -> str:
     )
 
 
+def _audit_section(report: dict[str, Any]) -> str:
+    audit = report.get("postdelivery_audit")
+    if not audit:
+        return ""
+    files = audit["file_lens"]
+    byt = audit["byte_lens"]
+    counts = audit["unit_counts"]
+    thresholds = audit["thresholds"]
+
+    def ratio(value: object) -> str:
+        return "—" if value is None else f"{float(value) * 100:.2f}%"
+
+    def number(value: object) -> str:
+        return "—" if value is None else f"{float(value):.2f}"
+
+    def verdict(value: object) -> str:
+        return {
+            "exceeds": "超过阈值，需要整改",
+            "within": "未超过阈值",
+            "insufficient": "不足以判定",
+        }.get(str(value), _text(value))
+
+    rows = [
+        ("错误文件数（权重 1/π）", number(files["wrong_files_estimate"]),
+         ratio(files["wrong_file_ratio_estimate"]), ratio(files["lower_ratio"]),
+         ratio(files["upper_ratio_95"]), verdict(thresholds["file_verdict"])),
+        ("错误文件中的 UTF-8 输出字节（权重 输出字节/π）",
+         number(byt["exposed_wrong_output_bytes_estimate"]),
+         ratio(byt["exposed_wrong_output_byte_ratio_estimate"]),
+         ratio(byt["lower_ratio"]), ratio(byt["upper_ratio_95"]),
+         verdict(thresholds["byte_verdict"])),
+    ]
+    lens = "".join(
+        "<tr><td>{}</td><td class=\"num\">{}</td><td class=\"num\">{}</td>"
+        "<td class=\"num\">{}</td><td class=\"num\">{}</td><td>{}</td></tr>".format(
+            _text(name), _text(point), _text(share), _text(low), _text(high),
+            _text(outcome),
+        )
+        for name, point, share, low, high, outcome in rows
+    )
+    strata = "".join(
+        "<tr><td>{}</td><td class=\"num\">{}</td><td class=\"num\">{}</td>"
+        "<td class=\"num\">{:.6f}</td><td class=\"num\">{}</td>"
+        "<td class=\"num\">{}</td><td class=\"num\">{}</td>"
+        "<td class=\"num\">{}</td></tr>".format(
+            _text(row["risk_level"]), _text(row["population"]),
+            _text(row["sample_size"]), float(row["inclusion_probability"]),
+            _text(row["responded"]), _text(row["observed_wrong"]),
+            _text(row["upper_wrong_files_95"]), _text(row["upper_exposed_bytes_95"]),
+        )
+        for row in audit["strata"]
+    )
+    estimable = "是" if audit["estimable"] else "否"
+    reason = (
+        f"<p class=\"meta\">不可估原因：{_text(audit['not_estimable_reason'])}</p>"
+        if audit["not_estimable_reason"]
+        else ""
+    )
+    return f"""
+<h2>事后人工抽样审计</h2>
+<p class="meta">绑定批次：{_text(audit['batch_id'])}</p>
+<p class="meta">抽样框摘要：{_text(audit['frame_digest'])}</p>
+<p class="meta">抽样计划摘要：{_text(audit['plan_digest'])}</p>
+<p class="meta">估计类型：{_text(audit['estimate_type'] or '不可估')}；可估计：{_text(estimable)}</p>
+{reason}
+<p class="meta">交付文件 / 输出字节：{_text(counts['delivered_files'])} /
+{_text(counts['delivered_output_bytes'])}；已审 / 已回应：{_text(counts['sampled_files'])} /
+{_text(counts['responded_files'])}；undecidable / 未回应 / 输出缺失：
+{_text(counts['undecidable_files'])} / {_text(counts['no_response_files'])} /
+{_text(counts['missing_output_files'])}</p>
+<table>
+<thead><tr><th>口径</th><th class="num">点估计</th><th class="num">点估计占比</th>
+<th class="num">95% 下界</th><th class="num">95% 上界</th><th>整改结论</th></tr></thead>
+<tbody>{lens}</tbody>
+</table>
+<p class="meta">文件告警线 {ratio(thresholds['file_ratio'])}；字节暴露告警线
+{ratio(thresholds['byte_ratio'])}。字节口径衡量错误文件中的输出字节暴露，
+不是精确错误字节数。</p>
+<table>
+<thead><tr><th>风险层</th><th class="num">总体</th><th class="num">样本</th>
+<th class="num">入样概率</th><th class="num">回应</th><th class="num">实测错误</th>
+<th class="num">错误数上界</th><th class="num">字节上界</th></tr></thead>
+<tbody>{strata}</tbody>
+</table>
+"""
+
+
 def render_html(report: dict[str, Any]) -> str:
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -134,6 +221,7 @@ def render_html(report: dict[str, Any]) -> str:
 <thead><tr><th>指标</th><th class="num">数值</th></tr></thead>
 <tbody>{_ledger_table(report['ledger'])}</tbody>
 </table>
+{_audit_section(report)}
 <footer>本报告由本地字节与 SQLite 台账生成；无外部资源，不自动进行二次编码修复。</footer>
 </main>
 </body>

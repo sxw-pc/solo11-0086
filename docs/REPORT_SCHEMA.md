@@ -162,3 +162,61 @@ out/
 - 浮点比例和置信度固定六位小数。
 - `report.json`、`report.md`、`report.html` 与 `manifest.json` 不包含 SQLite 自增 ID、`run_count`、`updated_at` 等易变字段。
 - 固定 `--now` 后，同一输入与配置的 manifest 与三份报告应字节稳定；`decodebench.sqlite3` 的物理文件不承诺字节稳定。
+
+## 6. 事后人工抽样审计
+
+`audit` 只读取 `manifest.json` 与只读 SQLite 查询，不修改编码裁决、转码文件、
+台账或自动交付门槛。
+
+### 6.1 抽样框（`audit-frame/1.0`）
+
+由 `manifest.build_audit_frame` 构造，抽样单位为 `rel_path` 对应的已交付文件：
+
+| 字段 | 含义 |
+| --- | --- |
+| `batch_id` / `batch_key` | 与原批次一致的确定性身份 |
+| `rule_version` / `config_fingerprint` / `manifest_generated_at` | 绑定原批次 |
+| `delivered_files[]` | 每个已交付文件：`rel_path`、`source_sha256`、`output_sha256`、`output_bytes`、`output_rel_path`、`risk_level` |
+| `excluded_files[]` | 转码失败等未交付文件及原因；不进入字节分母 |
+| `population` | 已交付文件数、已交付输出字节数与各风险层总体数 |
+| `frame_digest` | 对其余字段的规范化 SHA-256；被改写即拒绝 |
+
+### 6.2 抽样计划（`audit-plan/1.0`）
+
+- `design = stratified_srs_without_replacement`，按 `risk_level` 分层；
+- `strata[]` 记录每层 `population`、`sample_size`、`inclusion_probability`
+  与 `sampled_paths`；
+- `units[]` 记录每个交付文件的 `stratum_sample_size`、`inclusion_probability`
+  与是否 `sampled`；
+- `estimable` 为假时 `blocking_reason` 说明预算不足以让每个非空层都有正入样概率；
+- `plan_digest` 绑定整份计划，事后缩小入样概率会被拒绝。
+
+### 6.3 人工标签（`audit-label/1.0`）
+
+每条标签绑定 `batch_id`、`batch_key`、`frame_digest`、`plan_digest`、
+`rel_path`、`source_sha256`、`output_sha256` 与 `verdict`
+（`correct` / `wrong` / `undecidable`）。批次、框、计划、源/输出 SHA 任一不符、
+重复提交或文件未入样都会抛 `AuditError`。未回应文件记为 `no_response`，
+输出文件缺失记为 `output_missing`，二者都不计为 `correct`。
+
+### 6.4 估计结果（`audit-estimate/1.0`）
+
+| 口径 | 点估计 | 分母 |
+| --- | --- | --- |
+| `file_lens` | 错误文件数（权重 `1/π`）及其比例 | 已交付文件数 |
+| `byte_lens` | 错误文件中的 UTF-8 输出字节（权重 `output_bytes/π`）及比例 | 已交付 UTF-8 输出字节数 |
+
+`byte_lens.not_exact_error_bytes` 恒为真：该口径是“错误文件中的输出字节暴露”，
+不是精确错误字节数，也不能用 `warning_count`、文件个数或源字节数替代。
+
+- 全审且全部回应时 `estimate_type = census`，区间无抽样方差；
+- 预算不足时点估计标为 `design_weighted_estimate`，并按各层超几何单侧界给出
+  错误文件数上界；字节上界在该层上界允许的未确认文件内按输出字节数降序分配，
+  不会用文件数界乘平均文件大小；
+- `confidence_allocation = bonferroni_equal_split_across_nonempty_strata`，
+  `per_stratum_alpha = (1-confidence)/层数`；
+- `thresholds.file_verdict` / `thresholds.byte_verdict` 取 `exceeds`、
+  `within` 或 `insufficient`；阈值落在上下界之间时两者都为 `insufficient`。
+
+审计结果可注入 `report.json` / `report.md` / `report.html` 的
+`postdelivery_audit` 字段；不注入时报告字节与既有 golden 一致。

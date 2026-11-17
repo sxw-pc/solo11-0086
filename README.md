@@ -56,6 +56,20 @@ python -m decodebench pipeline --config configs/demo.yml --now 2024-01-01T00:00:
 python -m decodebench serve --config configs/demo.yml
 ```
 
+另有只读的事后人工抽样审计：
+
+```bash
+# 冻结抽样框、按风险层分层抽样并给出双口径估计
+python -m decodebench audit --config configs/demo.yml --budget 4 --seed 7
+
+# 提交人工标签（correct / wrong / undecidable）后重新估计
+python -m decodebench audit --config configs/demo.yml --budget 4 --seed 7 \
+  --labels labels.json
+```
+
+`audit` 不写台账、不改编码裁决、不改转码文件或自动交付门槛；它只读取
+`manifest.json` 与只读 SQLite 查询结果。
+
 也可以使用：
 
 ```bash
@@ -67,6 +81,41 @@ make count
 ```
 
 `--now` 会归一化为 UTC，并写入 manifest、SQLite 批次时间和报告。固定该值后，同一输入和配置生成的 manifest 与 JSON/Markdown/HTML 报告字节稳定。
+
+## 事后人工抽样审计
+
+审计回答两个不同问题，并分别给出整改结论：
+
+1. **文件数口径**：这一批有多少交付文件存在真实文字错误。每个入样文件权重
+   `1 / 入样概率`，分母是已交付文件总数。
+2. **字节暴露口径**：错误文件占了多少已交付 UTF-8 输出字节。每个入样文件权重
+   `output_bytes / 入样概率`，分母是已交付 UTF-8 输出字节总数。它衡量的是
+   “错误文件中的输出字节暴露”，**不是**精确的错误字节数。
+
+两者分母与权重不同，因此可能给出相反的整改优先级：11 份交付中 1 份 1 MiB
+的确认错误加 10 份 100 B 的确认正确，文件数错误率为 `1/11 ≈ 9.1%`（低于 10%
+文件告警线），而字节暴露率超过 99%（高于 10% 字节告警线）。
+
+审计设计要点：
+
+- **抽样框**：以 `rel_path` 对应的已交付文件为单位，冻结源 SHA、输出 SHA、
+  输出字节数、风险层、批次身份与框摘要。转码失败的文件不进入交付框，单列
+  在 `excluded_files`。
+- **分层无放回抽样**：按既有风险层分层，给定预算与可注入种子，记录各层总体数、
+  样本数与每文件入样概率。预算不足以让每个非空层都有正入样概率时，整体标记
+  为**不可估**，而不是把未抽层当作安全。
+- **标签绑定**：`correct` / `wrong` / `undecidable` 必须核对批次、源 SHA、
+  输出 SHA 与抽样计划摘要。换版、重复或未入样标签直接拒绝，不会静默改写统计。
+  未审核文件不当作 `correct`；风险等级高也不自动当作 `wrong`。
+- **保守上界**：全审时给出无抽样方差的精确值；预算不足时点估计标为设计加权
+  估计，并按分层无放回设计的超几何单侧界给出错误文件数上界，再在该层上界允许
+  的未确认文件内按输出字节数从大到小分配，得到字节暴露上界——不会用文件数界
+  乘平均文件大小。多层的联合置信度按 Bonferroni 等分到各非空层。
+- **不可判场景**：单层只审一份、`undecidable`、未回应与输出丢失都会扩大上界并
+  记录原因，不伪造零方差，也不事后缩小入样概率。
+- 阈值落在上下界之间时，两个口径都答“不足以判定”。审计结果绑定原批次框摘要；
+  人工标签只影响审计输出，不反馈训练或改动自动发布规则。
+
 
 ## 配置
 
@@ -152,6 +201,8 @@ pytest -q
 - mojibake 定位、风险等级与警告；
 - SQLite 幂等与只读查询；
 - 固定 `--now` 的报告/manifest 字节稳定性；
+- 事后人工抽样审计：11 文件反例、分层抽样概率、预算不足、未回应/undecidable、
+  输出字节权重、联合上界、换版标签拒绝与两种整改口径；
 - Flask 只读页面与不存在可变路由；
 - 真实命令行子进程端到端测试。
 
@@ -187,6 +238,11 @@ decodebench/
     pipeline.py
     reporting.py
     report_html.py
+    manifest.py
+    audit.py
+    audit_common.py
+    audit_labels.py
+    audit_estimate.py
     util.py
     web.py
     templates/
@@ -212,6 +268,8 @@ decodebench/
     test_mojibake.py
     test_ledger_idempotency.py
     test_reporting_stability.py
+    test_postdelivery_audit.py
+    test_postdelivery_audit_labels.py
     test_web_readonly.py
     test_cli_pipeline.py
   docs/
@@ -228,7 +286,7 @@ decodebench/
 python scripts/count_lines.py
 ```
 
-当前源码、脚本与测试合计约 3,847 行；所有 Python 文件均不超过 300 行。`count_lines.py` 会检查 2500–4500 行总量与单文件上限，任一条件不满足即返回非零。
+当前源码、脚本与测试合计约 5,200 行；所有 Python 文件均不超过 300 行。`count_lines.py` 会检查 2500–5600 行总量与单文件上限，任一条件不满足即返回非零。
 
 ## 合规
 

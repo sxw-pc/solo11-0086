@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,7 @@ from .util import write_json
 
 RISK_LEVELS = ("none", "low", "medium", "high")
 SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3}
+AUDIT_FRAME_SCHEMA = "audit-frame/1.0"
 
 
 def _warning_rows(warnings: list[WarningItem]) -> list[dict[str, Any]]:
@@ -140,3 +143,82 @@ def build_manifest(
 def write_manifest(config: Config, manifest: dict[str, Any]) -> Path:
     write_json(config.manifest_path, manifest)
     return config.manifest_path
+
+
+def _canonical_json(data: Any) -> str:
+    return json.dumps(
+        data, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+
+
+def _frame_digest(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def build_audit_frame(manifest: dict[str, Any]) -> dict[str, Any]:
+    """冻结某批次的交付文件抽样框；调用方不得改写编码裁决或交付门槛。
+
+    抽样单位是 ``rel_path`` 对应的交付文件。只有已成功写出 UTF-8 输出的文件
+    才进入抽样框：转码失败的文件没有可复核的交付字节，不能冒充交付文件，
+    也不能被静默当作 correct。未交付文件单独记录在 ``excluded`` 中，
+    其输出字节数不进入字节暴露分母。
+    """
+    from .ledger import batch_identity_from_manifest
+
+    batch_key, batch_id = batch_identity_from_manifest(manifest)
+    included: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
+    for item in manifest["files"]:
+        transcode = item["transcode"]
+        output_rel_path = transcode["output_rel_path"]
+        if not transcode["success"] or not output_rel_path:
+            excluded.append(
+                {
+                    "rel_path": item["rel_path"],
+                    "reason": "no_delivered_output",
+                    "error": transcode.get("error"),
+                }
+            )
+            continue
+        included.append(
+            {
+                "rel_path": item["rel_path"],
+                "source_sha256": item["source_sha256"],
+                "output_sha256": transcode["output_sha256"],
+                "output_bytes": int(transcode["bytes_written"]),
+                "output_rel_path": output_rel_path,
+                "risk_level": item["mojibake"]["level"],
+            }
+        )
+    included.sort(key=lambda row: str(row["rel_path"]))
+    excluded.sort(key=lambda row: str(row["rel_path"]))
+    risk_counts = Counter(str(row["risk_level"]) for row in included)
+    strata = [
+        {"risk_level": level, "population": int(risk_counts.get(level, 0))}
+        for level in RISK_LEVELS
+        if risk_counts.get(level, 0) > 0
+    ]
+    body: dict[str, Any] = {
+        "schema_version": AUDIT_FRAME_SCHEMA,
+        "project": "decodebench",
+        "kind": "postdelivery_audit_frame",
+        "batch_id": batch_id,
+        "batch_key": batch_key,
+        "rule_version": manifest["rule_version"],
+        "config_fingerprint": manifest["config_fingerprint"],
+        "scan_root": manifest["scan_root"],
+        "manifest_generated_at": manifest["generated_at"],
+        "unit": "delivered_file_per_rel_path",
+        "strata_by": "risk_level",
+        "ordered_risk_levels": list(RISK_LEVELS),
+        "delivered_files": included,
+        "excluded_files": excluded,
+        "population": {
+            "delivered_files": len(included),
+            "delivered_output_bytes": sum(row["output_bytes"] for row in included),
+            "excluded_files": len(excluded),
+            "strata": strata,
+        },
+    }
+    body["frame_digest"] = _frame_digest(body)
+    return body

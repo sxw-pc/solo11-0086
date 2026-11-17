@@ -13,8 +13,12 @@ from .config import Config
 from .ledger_schema import SCHEMA
 
 
-def idempotency_key(source_sha256: str, config_fingerprint: str) -> str:
-    return f"{source_sha256}:{RULE_VERSION}:{config_fingerprint}"
+def idempotency_key(
+    source_sha256: str,
+    config_fingerprint: str,
+    rule_version: str = RULE_VERSION,
+) -> str:
+    return f"{source_sha256}:{rule_version}:{config_fingerprint}"
 
 
 def _connect(path: Path) -> sqlite3.Connection:
@@ -34,9 +38,25 @@ def initialize(db_path: Path) -> None:
         connection.close()
 
 
-def _batch_identity(files: list[dict[str, Any]], config: Config) -> tuple[str, str]:
+def batch_identity_from_manifest(manifest: dict[str, Any]) -> tuple[str, str]:
+    """仅凭 manifest 派生与 record_batch 相同的 (batch_key, batch_id)。
+
+    审计抽样框必须绑定原批次身份，而不依赖已经打开的 SQLite 台账；
+    这里复用同样的构成规则，避免两套 ID 漂移。
+    """
+    files = manifest["files"]
+    rule_version = str(manifest["rule_version"])
+    fingerprint = str(manifest["config_fingerprint"])
+    return batch_identity(files, fingerprint, rule_version)
+
+
+def batch_identity(
+    files: list[dict[str, Any]], fingerprint: str, rule_version: str = RULE_VERSION
+) -> tuple[str, str]:
+    """批次身份构成规则：按 (幂等键, 路径) 排序后的 SHA-256。"""
     parts = sorted(
-        f"{idempotency_key(str(item['source_sha256']), config.fingerprint)}|{item['rel_path']}"
+        f"{idempotency_key(str(item['source_sha256']), fingerprint, rule_version)}"
+        f"|{item['rel_path']}"
         for item in files
     )
     source = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
@@ -251,7 +271,7 @@ def record_batch(config: Config, manifest: dict[str, Any], now: str) -> dict[str
     """幂等写入一个批次；相同 key 只更新既有批次与文件。"""
     initialize(config.db_path)
     files = manifest["files"]
-    batch_key, batch_id = _batch_identity(files, config)
+    batch_key, batch_id = batch_identity_from_manifest(manifest)
     conflict_count = sum(1 for item in files if item["decision"]["conflicts"])
     transcoded_count = sum(1 for item in files if item["transcode"]["success"])
     connection = _connect(config.db_path)

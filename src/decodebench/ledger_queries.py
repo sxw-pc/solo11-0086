@@ -122,3 +122,30 @@ def get_file_detail(
         return file_data
     finally:
         connection.close()
+
+
+def list_delivered_files(db_path: Path, batch_id: str) -> list[dict[str, Any]]:
+    """只读列出某批次已交付的 UTF-8 输出，用于构造事后审计抽样框。
+
+    该查询不写台账、不改决策；只返回路径、源/输出 SHA 与输出字节数。
+    未成功写出输出的文件不会出现在结果中。
+    """
+    if not db_path.is_file():
+        return []
+    connection = _connect_readonly(db_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT rel_path, source_sha256, output_rel_path, output_sha256,
+                   source_size, risk_level
+            FROM files
+            WHERE batch_id = ? AND transcode_success = 1
+              AND output_rel_path IS NOT NULL AND output_sha256 IS NOT NULL
+            ORDER BY rel_path ASC
+            """,
+            (batch_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        connection.close()
+

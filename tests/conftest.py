@@ -129,3 +129,103 @@ def fixture_hashes_map():
 @pytest.fixture
 def manifest_reader():
     return load_json_manifest
+
+
+# --- 事后审计测试共用构造器 -------------------------------------------------
+
+
+def audit_content(rel: str, size: int) -> bytes:
+    head = rel.encode("utf-8")
+    return (head * (size // len(head) + 1))[:size]
+
+
+def audit_manifest(specs: list[dict[str, Any]]) -> dict[str, Any]:
+    """用最小交付清单构造抽样框输入；源/输出 SHA 与输出字节均可复现。"""
+    files = []
+    for spec in specs:
+        rel = str(spec["rel"])
+        ok = bool(spec.get("ok", True))
+        out_bytes = int(spec.get("out", 0))
+        payload = audit_content(rel, out_bytes)
+        files.append(
+            {
+                "rel_path": rel,
+                "source_size": int(spec.get("src", out_bytes)),
+                "source_sha256": "src-" + rel,
+                "source_mtime": NOW,
+                "sidecar": {"path": None, "present": False, "error": None},
+                "bom": None,
+                "evidence": [],
+                "statistical_candidates": [],
+                "decision": {
+                    "encoding": "utf-8",
+                    "confidence": 1.0,
+                    "method": "fallback",
+                    "reason": "test",
+                    "error_codes": [],
+                    "conflicts": [],
+                },
+                "transcode": {
+                    "success": ok,
+                    "encoding": "utf-8",
+                    "errors": "strict",
+                    "output_rel_path": rel if ok else None,
+                    "source_sha256": "src-" + rel,
+                    "output_sha256": hashlib.sha256(payload).hexdigest() if ok else None,
+                    "bytes_written": out_bytes if ok else 0,
+                    "decoded_chars": out_bytes,
+                    "replacement_count": 0,
+                    "replacement_used": False,
+                    "bom_removed": False,
+                    "rewrites": [],
+                    "error": None if ok else "decode failed",
+                },
+                "mojibake": {
+                    "level": str(spec.get("risk", "none")),
+                    "findings": [],
+                    "recommendation": "",
+                },
+                "warnings": [],
+                "warning_count": int(spec.get("warnings", 0)),
+            }
+        )
+    return {
+        "schema_version": "1.0",
+        "project": "decodebench",
+        "rule_version": "test-rule",
+        "generated_at": NOW,
+        "config_fingerprint": "test-fingerprint",
+        "scan_root": "/scan",
+        "config_snapshot": {},
+        "summary": {"files_total": len(files)},
+        "files": files,
+    }
+
+
+def audit_write_outputs(root: Path, manifest: dict[str, Any]) -> None:
+    for item in manifest["files"]:
+        transcode = item["transcode"]
+        if transcode["success"]:
+            path = root / str(transcode["output_rel_path"])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(audit_content(item["rel_path"], transcode["bytes_written"]))
+
+
+@pytest.fixture
+def audit_inputs():
+    from decodebench.manifest import build_audit_frame
+
+    def build(specs: list[dict[str, Any]]):
+        return build_audit_frame(audit_manifest(specs))
+
+    return build
+
+
+@pytest.fixture
+def audit_frame_from_manifest():
+    return audit_manifest
+
+
+@pytest.fixture
+def audit_writer():
+    return audit_write_outputs
