@@ -70,5 +70,27 @@ CREATE TABLE IF NOT EXISTS warnings (
 CREATE INDEX IF NOT EXISTS idx_files_batch ON files(batch_id, rel_path);
 CREATE INDEX IF NOT EXISTS idx_evidence_file ON evidence(file_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_warnings_file ON warnings(file_id, code);
+CREATE TABLE IF NOT EXISTS validation_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id TEXT NOT NULL REFERENCES batches(batch_id),
+    rel_path_304 TEXT NOT NULL, status TEXT NOT NULL, resource_key TEXT,
+    etag_304 TEXT, request_vary_json TEXT NOT NULL, captured_at_304 TEXT,
+    donor_rel_path TEXT, donor_captured_at TEXT, entity_sha256 TEXT,
+    sidecar_200_sha256 TEXT, sidecar_304_sha256 TEXT, header_edition TEXT,
+    synthesized_headers_json TEXT NOT NULL, error_codes_json TEXT NOT NULL,
+    reason TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE(batch_id, rel_path_304)
+);
+CREATE TABLE IF NOT EXISTS validation_views (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL REFERENCES validation_events(id) ON DELETE CASCADE,
+    contract TEXT NOT NULL, view_rel_path TEXT, encoding TEXT, method TEXT,
+    success INTEGER NOT NULL, published INTEGER NOT NULL, entity_sha256 TEXT NOT NULL,
+    output_sha256 TEXT, detail_json TEXT NOT NULL, UNIQUE(event_id, contract)
+);
+CREATE INDEX IF NOT EXISTS idx_validation_events_batch
+    ON validation_events(batch_id, rel_path_304);
+CREATE INDEX IF NOT EXISTS idx_validation_views_event
+    ON validation_views(event_id, contract);
 """
 

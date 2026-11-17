@@ -22,6 +22,17 @@ ERROR_CODES = {
     "W_CONTROL_CHARS": "正文包含不可打印控制字符",
     "W_QUESTION_RUNS": "正文包含连续问号",
     "W_SURROGATE_TRACE": "正文包含非法代理项痕迹",
+    "E_304_NOT_STATE_SIDECAR": "304 缺少离线验证合成状态字段",
+    "E_304_MALFORMED_STATE": "304 状态 sidecar 结构不符合合同",
+    "E_304_NO_CANDIDATE_200": "找不到同资源键、同 Vary 且早于 304 的 200 原件",
+    "E_304_VARY_INPUT_MISSING": "304 缺少 Vary 请求输入，无法确认协商变体",
+    "E_304_WEAK_VALIDATOR": "只存在弱验证标记（W/），禁止复用正文",
+    "E_304_ETAG_MISMATCH": "304 与候选 200 的强 ETag 不一致",
+    "E_304_ENTITY_CONFLICT": "多个候选 200 实体摘要矛盾，无法唯一归属",
+    "E_304_ORIGINAL_UNREADABLE": "被归属 200 原始实体字节不可读或已损坏",
+    "E_304_REFRESHED_UNDECODABLE": "304 更新头部无法严格解码复用字节，拒绝发布",
+    "W_304_ATTRIBUTION_REVIEW": "304 无法自动归属，保留证据待人工复核",
+    "W_304_FORENSIC_VALIDATION": "304 仅记为验证事件，沿用 200 原始视图",
 }
 
 CONFLICT_CODES = frozenset(code for code in ERROR_CODES if code.endswith("CONFLICT"))

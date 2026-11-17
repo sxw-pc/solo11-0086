@@ -122,3 +122,25 @@ def get_file_detail(
         return file_data
     finally:
         connection.close()
+
+
+def list_validation_events(db_path: Path, batch_id: str) -> list[dict[str, Any]]:
+    """只读返回批次内的 304 验证事件及两个合同视图。"""
+    if not db_path.is_file():
+        return []
+    connection = _connect_readonly(db_path)
+    try:
+        rows = connection.execute(
+            "SELECT * FROM validation_events WHERE batch_id = ? ORDER BY rel_path_304 ASC",
+            (batch_id,)).fetchall()
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            event = dict(row)
+            view_rows = connection.execute(
+                "SELECT * FROM validation_views WHERE event_id = ? ORDER BY contract ASC",
+                (event["id"],)).fetchall()
+            event["views"] = [dict(view) for view in view_rows]
+            events.append(event)
+        return events
+    finally:
+        connection.close()

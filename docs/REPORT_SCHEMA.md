@@ -32,7 +32,8 @@ out/
 | `scan_root` | string | POSIX 风格的扫描根绝对路径 |
 | `config_snapshot` | object | 合并默认值后的 YAML 配置快照 |
 | `summary` | object | 批次汇总 |
-| `files` | array | 按 `rel_path` 升序的文件条目 |
+| `validation_events` | array | 按 `rel_path_304` 升序的离线 304 验证事件；无状态 sidecar 时为空数组 |
+| `files` | array | 按 `rel_path` 升序的文件条目（不含 304 零字节验证响应） |
 
 ### 2.1 文件条目
 
@@ -108,6 +109,27 @@ out/
 
 `warning_distribution` 按错误码升序，每项为 `code`、`count`、`severity`。`conflict_files` 按“拥有非空 conflicts 的文件数”统计，而不是冲突消息条数。
 
+### 2.8 validation_events
+
+每个带本地状态 sidecar 的 304 响应产生一个事件，无论是否归属成功：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `rel_path_304` | string | 304 零字节响应的相对路径 |
+| `status` | string | `attributed` 或 `unattributed` |
+| `resource_key` / `etag_304` / `captured_at_304` | string/null | 304 sidecar 中的资源键、强 ETag、捕获时间 |
+| `request_vary` | object | 304 的 Vary 请求输入（键名小写归一） |
+| `donor_rel_path` / `donor_captured_at` | string/null | 被归属 200 的路径与捕获时间 |
+| `entity_sha256` | string/null | 被复用的 200 原始实体字节摘要 |
+| `sidecar_200_sha256` / `sidecar_304_sha256` | string/null | 两份 sidecar 原文摘要，分别记录 |
+| `header_edition` | string/null | 头部版次标识（如 `200-original+304-override`） |
+| `synthesized_headers` | array | 合成头字段，每项含 `name`、`value`、`source`（`status_200`/`status_304`） |
+| `error_codes` | array | 归属/发布错误码与复核警告 |
+| `candidate_rel_paths` | array | 参与匹配的候选 200 路径 |
+| `views` | array | 两个合同视图；无法归属时为空数组 |
+
+`views` 每项含 `contract`（`forensic_original`/`refreshed_view`）、`view_rel_path`、`success`、`published`、`encoding`、`method`、`entity_sha256`、`output_sha256`、`header_basis`。refreshed 被拒绝时 `published=false`、`view_rel_path` 下无文件，并在 `rejection` 中保留矛盾说明；refreshed 成功时附带独立 `evidence`、`decision`、`transcode` 块。两视图的 `entity_sha256` 必须相同。
+
 ## 3. `reports/report.json`
 
 报告是面向复核的稳定摘要，不是 manifest 的复制：
@@ -154,6 +176,12 @@ out/
 ### warnings
 
 `id`、`file_id`、`code`、`severity`、`message`、`line_number`、`byte_offset`、`snippet`。按文件重建，不累积重复警告。
+
+### validation_events / validation_views
+
+`validation_events`：`id`、`batch_id`、`rel_path_304`、`status`、`resource_key`、`etag_304`、`request_vary_json`、`captured_at_304`、`donor_rel_path`、`donor_captured_at`、`entity_sha256`、`sidecar_200_sha256`、`sidecar_304_sha256`、`header_edition`、`synthesized_headers_json`、`error_codes_json`、`reason`、时间戳；唯一约束 `(batch_id, rel_path_304)`。
+
+`validation_views`：`event_id` 外键、`contract`、`view_rel_path`、`encoding`、`method`、`success`、`published`、`entity_sha256`、`output_sha256`、`detail_json`；唯一约束 `(event_id, contract)`。无法归属的事件没有视图行。只读查询见 `ledger_queries.list_validation_events`。
 
 ## 5. 确定性约定
 

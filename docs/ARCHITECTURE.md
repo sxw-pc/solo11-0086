@@ -11,8 +11,11 @@
 | 模块 | 职责 |
 | --- | --- |
 | `config.py` | 读取 YAML、合并默认值、解析路径、校验回环地址、生成配置指纹 |
-| `scanner.py` | 确定性扫描扩展名、计算 SHA-256、记录 mtime、读取 sidecar |
-| `evidence.py` | 提取 BOM、HTTP 头、XML declaration、HTML meta、fallback 证据 |
+| `scanner.py` | 确定性扫描扩展名、计算 SHA-256、记录 mtime、读取 sidecar 与 sidecar 摘要，识别带本地状态的 304 验证响应 |
+| `validation.py` | 完全离线的 304 状态解析、200 归属（资源键/Vary/强 ETag/捕获时间）、头部合成与严格解码合同 |
+| `pipeline_validation.py` | 304 双合同视图的证据/裁决/转码编排与 manifest/台账事件结构 |
+| `ledger_validation.py` | 304 验证事件与双合同视图的 SQLite 幂等写入 |
+| `evidence.py` | 提取 BOM、HTTP 头、XML declaration、HTML meta、fallback 证据，以及 304 合成头证据 |
 | `detectors.py` | BOM 表、编码别名、严格解码、字符比例、UTF-16 形态识别 |
 | `scorer.py` | 对严格解码结果做确定性评分与排序，选择统计获胜者 |
 | `resolver.py` | 按优先级裁决、生成冲突错误码、置信度与警告 |
@@ -91,6 +94,32 @@ YAML config
 
 冲突与警告是证据，不是自动修复指令。程序不会反复猜编码直到“看起来正常”。
 
+## 5A. 离线 304 验证响应处理
+
+采集器落盘的 304 响应只有更新后的头部、没有正文；把零字节当空文本转码会让复核者误以为页面内容消失。带本地状态合成 sidecar（`local_capture: true`，并含 `resource_key`、`captured_at`、`request_vary`、`etag`）的 304 因此走独立入口，全程只读本地文件，不访问网络。没有该标记的文件继续沿用逐文件流程。
+
+### 归属合同
+
+304 必须先归属到唯一一个满足全部条件的已保存 200：同一 `resource_key`、相同 `request_vary` 请求值、同一**强** ETag（`W/` 弱标记拒绝）、200 捕获时间严格早于 304、且 200 原始实体字节完整可读。以下情况一律标记为无法归属/待复核（`E_304_*` + `W_304_ATTRIBUTION_REVIEW`），不产出任何文本：
+
+- 多个候选 200 的实体 SHA-256 互相矛盾（`E_304_ENTITY_CONFLICT`）；
+- 只存在弱验证标记（`E_304_WEAK_VALIDATOR`）；
+- Vary 请求输入缺失（`E_304_VARY_INPUT_MISSING`）或 ETag 不匹配（`E_304_ETAG_MISMATCH`）；
+- 找不到候选（`E_304_NO_CANDIDATE_200`）或旧正文不可读/为空（`E_304_ORIGINAL_UNREADABLE`）。
+
+禁止用最近文件名、当前同目录文件或空 304 文件冒充正文；不同 Vary 语言变体之间不得继承旧 charset。
+
+### 头部合成与双合同
+
+合成有效头部时，只允许 304 中实际出现的头字段覆盖 200 的同名字段（大小写不敏感），未出现的字段沿用 200 旧值；每个字段记录来源版本（`status_200`/`status_304`）。事件分别记录：被验证实体摘要、200 与 304 各自 sidecar 原文摘要、头部合成结果与来源。304 的零字节文件不计入转码正文。
+
+- `forensic_original`：304 仅记录为一次验证事件，继续展示 200 当时的原始头部与按原裁决得到的 UTF-8 文本（输出即 200 普通转码产物）。
+- `refreshed_view`：复用 200 的**同一原始字节**，按 304 合成后的有效头部重新裁决，写入独立目录 `transcoded/_validation_views/`，旧视图仍可查。
+
+若 304 头部声明与复用字节无法严格解码、或与其 BOM 冲突（`E_304_REFRESHED_UNDECODABLE`），保留两边证据并拒绝发布 refreshed 视图，不用 fallback 或替换解码掩盖矛盾；forensic 视图不受影响。
+
+最小反例：200 字节 `C3 A9`、强 ETag `"v1"`、`charset=windows-1252`；后续同资源同 Vary 的 304 保持 `"v1"` 但改为 `charset=utf-8`。forensic 视图是 `Ã©`，refreshed 视图是 `é`，两者实体摘要完全相同、头部证据版次不同。304 不改 Content-Type 时两合同文本相同，但验证事件与头部版次仍分别记录。
+
 ## 6. 幂等键与台账
 
 文件幂等键严格由三部分组成：
@@ -106,6 +135,8 @@ YAML config
 - `batches` 仍只有一行，`run_count` 增加，`status` 变为 `reprocessed`；
 - 文件行按唯一约束更新，不新增重复记录；
 - 该文件的 evidence/decision/warnings 先删除再重建，避免重复行。
+
+304 验证事件写入 `validation_events` 表（归属状态、资源键、ETag、Vary 输入、实体摘要、两份 sidecar 摘要、合成头 JSON、错误码），每个事件的两个合同视图写入 `validation_views` 表（含是否发布、实体与输出摘要）；批次键同时包含文件幂等片段与验证事件身份片段，因此新增 304 证据会形成独立批次，重复运行仍保持幂等。无法归属的事件只落事件行、不产生视图行，也没有伪空文本产物。
 
 报告只读取稳定计数，不包含 `run_count`、`updated_at` 或 SQLite 自增 ID，因此重复执行仍可字节稳定。
 

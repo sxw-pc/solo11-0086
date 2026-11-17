@@ -1,4 +1,4 @@
-"""SQLite 台账：批次、文件、证据、决策与警告。"""
+"""SQLite 台账：批次、文件、证据、决策、警告与 304 验证事件。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,9 @@ from typing import Any
 from . import RULE_VERSION
 from .config import Config
 from .ledger_schema import SCHEMA
+from .ledger_validation import (
+    upsert_validation_event, validation_identity, validation_summary,
+)
 
 
 def idempotency_key(source_sha256: str, config_fingerprint: str) -> str:
@@ -34,11 +37,16 @@ def initialize(db_path: Path) -> None:
         connection.close()
 
 
-def _batch_identity(files: list[dict[str, Any]], config: Config) -> tuple[str, str]:
+def _batch_identity(
+    files: list[dict[str, Any]],
+    validation_events: list[dict[str, Any]],
+    config: Config,
+) -> tuple[str, str]:
     parts = sorted(
         f"{idempotency_key(str(item['source_sha256']), config.fingerprint)}|{item['rel_path']}"
         for item in files
     )
+    parts.extend(validation_identity(validation_events))
     source = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
     batch_key = hashlib.sha256(source.encode("utf-8")).hexdigest()
     return batch_key, batch_key[:20]
@@ -146,6 +154,16 @@ def _upsert_file(
     ).fetchone()
     assert row is not None
     file_id = int(row["id"])
+    _replace_file_children(connection, file_id, item, decision)
+    return file_id
+
+
+def _replace_file_children(
+    connection: sqlite3.Connection,
+    file_id: int,
+    item: dict[str, Any],
+    decision: dict[str, Any],
+) -> None:
     connection.execute("DELETE FROM evidence WHERE file_id = ?", (file_id,))
     connection.execute("DELETE FROM decisions WHERE file_id = ?", (file_id,))
     connection.execute("DELETE FROM warnings WHERE file_id = ?", (file_id,))
@@ -201,7 +219,6 @@ def _upsert_file(
                 warning["snippet"],
             ),
         )
-    return file_id
 
 
 def _ledger_summary(connection: sqlite3.Connection, batch_id: str) -> dict[str, Any]:
@@ -230,7 +247,7 @@ def _ledger_summary(connection: sqlite3.Connection, batch_id: str) -> dict[str, 
         """,
         (batch_id,),
     ).fetchone()["n"]
-    return {
+    summary = {
         "batch_id": batch_id,
         "files_in_batch": int(file_count),
         "conflict_files": int(conflict_count),
@@ -245,30 +262,34 @@ def _ledger_summary(connection: sqlite3.Connection, batch_id: str) -> dict[str, 
             connection.execute("SELECT COUNT(*) AS n FROM batches").fetchone()["n"]
         ),
     }
+    summary.update(validation_summary(connection, batch_id))
+    return summary
 
 
-def record_batch(config: Config, manifest: dict[str, Any], now: str) -> dict[str, Any]:
+def record_batch(
+    config: Config,
+    manifest: dict[str, Any],
+    now: str,
+    validation_events: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """幂等写入一个批次；相同 key 只更新既有批次与文件。"""
     initialize(config.db_path)
     files = manifest["files"]
-    batch_key, batch_id = _batch_identity(files, config)
+    events = validation_events or []
+    batch_key, batch_id = _batch_identity(files, events, config)
     conflict_count = sum(1 for item in files if item["decision"]["conflicts"])
     transcoded_count = sum(1 for item in files if item["transcode"]["success"])
     connection = _connect(config.db_path)
     try:
         with connection:
             _upsert_batch(
-                connection,
-                batch_id,
-                batch_key,
-                config,
-                now,
-                len(files),
-                conflict_count,
-                transcoded_count,
+                connection, batch_id, batch_key, config, now,
+                len(files), conflict_count, transcoded_count,
             )
             for item in files:
                 _upsert_file(connection, batch_id, item, config, now)
+            for event in sorted(events, key=lambda item: str(item["rel_path_304"])):
+                upsert_validation_event(connection, batch_id, event, now)
         return _ledger_summary(connection, batch_id)
     finally:
         connection.close()

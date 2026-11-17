@@ -27,6 +27,14 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sidecar_sha256(path: Path | None) -> str | None:
+    """计算 sidecar 原文摘要；不可读时返回 None 而不是抛错。"""
+    if path is None:
+        return None
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
 def _utc_mtime(path: Path) -> str:
     try:
         stamp = path.stat().st_mtime
@@ -72,6 +80,16 @@ def _load_sidecar(path: Path) -> tuple[dict[str, Any], str | None]:
     if headers is not None and not isinstance(headers, dict):
         return {}, "sidecar.headers 必须是对象"
     return data, None
+
+
+def is_state_sidecar(sidecar: dict[str, Any]) -> bool:
+    """识别带本地状态的合成 sidecar（离线验证合同的入口标记）。"""
+    return isinstance(sidecar, dict) and bool(sidecar.get("local_capture"))
+
+
+def is_validation_response(source: SourceFile) -> bool:
+    """判断扫描项是否为带本地状态的 304 验证响应。"""
+    return is_state_sidecar(source.sidecar) and source.sidecar.get("status") == 304
 
 
 def scan(config: Config) -> list[SourceFile]:
@@ -121,6 +139,7 @@ def scan(config: Config) -> list[SourceFile]:
                 sidecar_rel=sidecar_rel,
                 sidecar=sidecar,
                 sidecar_error=sidecar_error,
+                sidecar_sha256=sidecar_sha256(sidecar_path),
             )
         )
     return results

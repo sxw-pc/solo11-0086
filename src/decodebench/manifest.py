@@ -122,8 +122,12 @@ def build_manifest(
     config: Config,
     now: str,
     files: list[dict[str, Any]],
+    validation_events: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     ordered = sorted(files, key=lambda item: str(item["rel_path"]))
+    events = sorted(
+        validation_events or [], key=lambda item: str(item["rel_path_304"])
+    )
     return {
         "schema_version": "1.0",
         "project": "decodebench",
@@ -133,6 +137,7 @@ def build_manifest(
         "scan_root": config.scan_root.as_posix(),
         "config_snapshot": config.raw,
         "summary": summarize(ordered),
+        "validation_events": events,
         "files": ordered,
     }
 

@@ -104,30 +104,47 @@ def _meta_evidence(raw: bytes) -> list[Evidence]:
     return found
 
 
-def _header_evidence(sidecar: dict[str, Any]) -> list[Evidence]:
+def _header_evidence(sidecar: dict[str, Any], note_prefix: str = "sidecar 响应头") -> list[Evidence]:
     headers = sidecar.get("headers", {})
     if not isinstance(headers, dict):
         return []
-    content_types: list[tuple[str, str]] = []
-    for name, value in headers.items():
-        if str(name).lower() == "content-type" and isinstance(value, str):
-            content_types.append((str(name), value))
-    content_types.sort(key=lambda item: item[0].lower())
+    content_types = sorted(
+        ((str(name), value) for name, value in headers.items()
+         if str(name).lower() == "content-type" and isinstance(value, str)),
+        key=lambda item: item[0].lower())
     found: list[Evidence] = []
     for name, value in content_types:
         match = HEADER_CHARSET.search(value)
-        if not match:
-            continue
-        found.append(
-            Evidence(
-                source="http_header",
-                declared=match.group(1),
-                offset=None,
-                line=None,
-                note=f"sidecar 响应头 {name}: {value}",
-            )
-        )
+        if match:
+            found.append(Evidence(source="http_header", declared=match.group(1),
+                                  offset=None, line=None,
+                                  note=f"{note_prefix} {name}: {value}"))
     return found
+
+
+def collect_refreshed_evidence(
+    raw: bytes, synthesized_headers: dict[str, str], fallback_encoding: str,
+) -> list[Evidence]:
+    """refreshed_view 证据链：BOM + 304 合成头 + 文档声明 + fallback。
+
+    HTTP 头证据只来自合成结果（200 旧值 + 304 覆盖），不重读任何 sidecar。
+    """
+    evidence: list[Evidence] = []
+    bom = detect_bom(raw)
+    if bom is not None:
+        evidence.append(Evidence(
+            source="bom", declared=str(bom["encoding"]), offset=0, line=1,
+            note=f"文件头字节 {bom['hex']}，长度 {bom['length']}"))
+    evidence.extend(_header_evidence(
+        {"headers": synthesized_headers}, "304 验证合成响应头"))
+    evidence.extend(_xml_ascii(raw))
+    if not any(item.source == "xml_declaration" for item in evidence):
+        evidence.extend(_xml_utf16(raw))
+    evidence.extend(_meta_evidence(raw))
+    evidence.append(Evidence(source="fallback", declared=fallback_encoding,
+                             offset=None, line=None,
+                             note="配置文件 detection.fallback_encoding"))
+    return evidence
 
 
 def collect_evidence(source: SourceFile, raw: bytes, config: Config) -> list[Evidence]:

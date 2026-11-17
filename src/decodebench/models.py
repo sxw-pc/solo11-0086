@@ -22,6 +22,7 @@ class SourceFile:
     sidecar_rel: str | None = None
     sidecar: dict[str, Any] = field(default_factory=dict)
     sidecar_error: str | None = None
+    sidecar_sha256: str | None = None
 
 
 @dataclass

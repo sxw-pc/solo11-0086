@@ -87,58 +87,54 @@ def _atomic_write(path: Path, data: bytes) -> None:
     os.replace(temporary, path)
 
 
-def transcode(source: SourceFile, raw: bytes, encoding: str, config: Config) -> TranscodeResult:
-    """按裁决编码严格或替换解码，只写入独立转码目录。"""
+def _write_view(output_rel_path: str, raw: bytes, source_sha256: str,
+                encoding: str, config: Config, rewrite_suffix: str) -> TranscodeResult:
     canonical = canonical_encoding(encoding)
     errors = config.transcode_errors
     try:
         text = raw.decode(canonical, errors=errors)
     except (UnicodeError, LookupError, ValueError) as exc:
         return TranscodeResult(
-            success=False,
-            encoding=canonical,
-            errors=errors,
-            output_rel_path=None,
-            source_sha256=source.sha256,
-            output_sha256=None,
-            bytes_written=0,
-            decoded_chars=0,
-            replacement_count=0,
-            replacement_used=False,
-            bom_removed=False,
-            rewrites=[],
-            error=f"{type(exc).__name__}: {exc}"[:300],
-        )
+            success=False, encoding=canonical, errors=errors, output_rel_path=None,
+            source_sha256=source_sha256, output_sha256=None, bytes_written=0,
+            decoded_chars=0, replacement_count=0, replacement_used=False,
+            bom_removed=False, rewrites=[],
+            error=f"{type(exc).__name__}: {exc}"[:300])
 
     bom_removed = False
     if detect_bom(raw) is not None and text.startswith("﻿"):
         text = text[1:]
         bom_removed = True
-
     rewrites: list[dict[str, object]] = []
     if config.rewrite_declarations:
-        text, rewrites = rewrite_declarations(text, Path(source.rel_path).suffix)
+        text, rewrites = rewrite_declarations(text, rewrite_suffix)
 
-    output = config.transcode_dir / source.rel_path
+    output = config.transcode_dir / output_rel_path
     try:
         output.resolve().relative_to(config.transcode_dir)
     except ValueError as exc:
-        raise ValueError(f"转码输出路径越界: {source.rel_path}") from exc
+        raise ValueError(f"转码输出路径越界: {output_rel_path}") from exc
     payload = text.encode("utf-8")
     _atomic_write(output, payload)
-    output_sha = hashlib.sha256(payload).hexdigest()
     replacement_count = text.count(chr(0xFFFD))
     return TranscodeResult(
-        success=True,
-        encoding=canonical,
-        errors=errors,
-        output_rel_path=source.rel_path,
-        source_sha256=source.sha256,
-        output_sha256=output_sha,
-        bytes_written=len(payload),
-        decoded_chars=len(text),
-        replacement_count=replacement_count,
-        replacement_used=replacement_count > 0,
-        bom_removed=bom_removed,
-        rewrites=rewrites,
-    )
+        success=True, encoding=canonical, errors=errors,
+        output_rel_path=output_rel_path, source_sha256=source_sha256,
+        output_sha256=hashlib.sha256(payload).hexdigest(),
+        bytes_written=len(payload), decoded_chars=len(text),
+        replacement_count=replacement_count, replacement_used=replacement_count > 0,
+        bom_removed=bom_removed, rewrites=rewrites)
+
+
+def transcode_view(output_rel_path: str, raw: bytes, source_sha256: str,
+                   encoding: str, config: Config,
+                   rewrite_suffix: str | None = None) -> TranscodeResult:
+    """把归属实体字节转码到显式视图路径（304 refreshed 视图），不覆盖 200 旧视图。"""
+    return _write_view(output_rel_path, raw, source_sha256, encoding, config,
+                       rewrite_suffix or Path(output_rel_path).suffix)
+
+
+def transcode(source: SourceFile, raw: bytes, encoding: str, config: Config) -> TranscodeResult:
+    """按裁决编码严格或替换解码，只写入独立转码目录。"""
+    return _write_view(source.rel_path, raw, source.sha256, encoding, config,
+                       Path(source.rel_path).suffix)
