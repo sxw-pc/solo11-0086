@@ -67,6 +67,13 @@ def _file_table(report: dict[str, Any]) -> str:
     rows: list[str] = []
     for item in report["files"]:
         conflict = '<span class="tag">是</span>' if item["conflict"] else "否"
+        delivery = item.get("delivery")
+        if delivery is not None and not delivery["auto_deliver"]:
+            transcode_state = '<span class="tag">拒判</span>'
+        elif item["transcode_success"]:
+            transcode_state = "成功"
+        else:
+            transcode_state = "失败"
         rows.append(
             "<tr><td>{}</td><td>{}</td><td class=\"num\">{:.6f}</td><td>{}</td>"
             "<td>{}</td><td>{}</td><td>{}</td><td class=\"num\">{}</td></tr>".format(
@@ -75,12 +82,58 @@ def _file_table(report: dict[str, Any]) -> str:
                 float(item["confidence"]),
                 _text(item["method"]),
                 conflict,
-                "成功" if item["transcode_success"] else "失败",
+                transcode_state,
                 _text(item["risk_level"]),
                 _text(item["warning_count"]),
             )
         )
     return "".join(rows)
+
+
+def _gate_table(report: dict[str, Any]) -> str:
+    rows: list[str] = []
+    for item in report["files"]:
+        delivery = item.get("delivery")
+        if delivery is None:
+            continue
+        state = (
+            "自动交付" if delivery["auto_deliver"]
+            else '<span class="tag">拒判</span>'
+        )
+        rows.append(
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td>"
+            "<td>{}</td><td>{}</td></tr>".format(
+                _text(item["rel_path"]),
+                state,
+                _text(delivery["rule_id"] or "-"),
+                _text(delivery["text_equivalence_class"]),
+                "是" if delivery["label_certain"] else "否",
+                "已定" if delivery["encoding_attribution_resolved"] else "未定",
+                _text("、".join(delivery["reject_reasons"]) or "-"),
+            )
+        )
+    if not rows:
+        return '<tr><td colspan="7">无门槛记录</td></tr>'
+    return "".join(rows)
+
+
+def _gate_section(report: dict[str, Any]) -> str:
+    if "risk_gate" not in report:
+        return ""
+    gate = report["risk_gate"]
+    return f"""
+<h2>风险校准门槛</h2>
+<p class="meta">发布合同：{_text(gate['contract'])} ｜ 规则版本：{_text(gate['rule_version'])} ｜
+标注摘要：{_text(gate['annotation_digest'])}</p>
+<p class="meta">风险预算：{_text(gate['risk_budget'])} ｜ 独立验证单侧精确上界：
+{_text(gate['validated_error_rate_upper_bound'])} ｜ 规则已推广：
+{'是' if gate['promoted'] else '否（全部拒判）'}</p>
+<table>
+<thead><tr><th>相对路径</th><th>结论</th><th>规则</th><th>文本等价类</th>
+<th>标签确定</th><th>编码归因</th><th>拒判原因</th></tr></thead>
+<tbody>{_gate_table(report)}</tbody>
+</table>
+"""
 
 
 def _ledger_table(ledger: dict[str, Any]) -> str:
@@ -129,6 +182,7 @@ def render_html(report: dict[str, Any]) -> str:
 <th>冲突</th><th>转码</th><th>风险</th><th class="num">警告</th></tr></thead>
 <tbody>{_file_table(report)}</tbody>
 </table>
+{_gate_section(report)}
 <h2>SQLite 台账摘要</h2>
 <table>
 <thead><tr><th>指标</th><th class="num">数值</th></tr></thead>

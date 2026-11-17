@@ -26,7 +26,10 @@
 | `report_html.py` | 零外链、零脚本 HTML 渲染 |
 | `web.py` | Flask 只读复核台，仅 GET 路由 |
 | `pipeline.py` | 端到端编排 |
-| `cli.py` | `pipeline` 与 `serve` 子命令、固定时钟解析 |
+| `cli.py` | `pipeline`、`calibrate` 与 `serve` 子命令、固定时钟解析 |
+| `riskstats.py` | 组级单侧精确上界（Clopper-Pearson，纯标准库） |
+| `calibration.py` | 离线标注校验、来源组拆分、门槛网格、风险校准与工件绑定 |
+| `gate.py` | 校准门槛在新响应上的应用与自动交付/拒判结论 |
 | `models.py` | 扫描、证据、候选、决策、转码、mojibake 数据结构 |
 | `util.py` | 原子写入与确定性 JSON 序列化 |
 

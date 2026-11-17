@@ -92,7 +92,7 @@ def _upsert_file(
     now: str,
 ) -> int:
     decision = item["decision"]
-    transcode = item["transcode"]
+    transcode = item["transcode"] or {}
     source_key = idempotency_key(str(item["source_sha256"]), config.fingerprint)
     connection.execute(
         """
@@ -132,10 +132,10 @@ def _upsert_file(
             len(decision["conflicts"]),
             item["warning_count"],
             item["mojibake"]["level"],
-            int(bool(transcode["success"])),
-            transcode["output_rel_path"],
-            transcode["output_sha256"],
-            int(int(transcode["replacement_count"]) > 0),
+            int(bool(transcode.get("success"))),
+            transcode.get("output_rel_path"),
+            transcode.get("output_sha256"),
+            int(int(transcode.get("replacement_count", 0)) > 0),
             now,
             now,
         ),
@@ -253,7 +253,9 @@ def record_batch(config: Config, manifest: dict[str, Any], now: str) -> dict[str
     files = manifest["files"]
     batch_key, batch_id = _batch_identity(files, config)
     conflict_count = sum(1 for item in files if item["decision"]["conflicts"])
-    transcoded_count = sum(1 for item in files if item["transcode"]["success"])
+    transcoded_count = sum(
+        1 for item in files if (item["transcode"] or {}).get("success")
+    )
     connection = _connect(config.db_path)
     try:
         with connection:

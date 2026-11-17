@@ -22,6 +22,8 @@ ERROR_CODES = {
     "W_CONTROL_CHARS": "正文包含不可打印控制字符",
     "W_QUESTION_RUNS": "正文包含连续问号",
     "W_SURROGATE_TRACE": "正文包含非法代理项痕迹",
+    "W_RISK_GATE_REJECTED": "风险校准门槛拒绝自动交付，未写入 UTF-8 产物",
+    "W_ENCODING_ATTRIBUTION_UNRESOLVED": "文本已自动交付，但规范编码归因未定（多候选文本等价）",
 }
 
 CONFLICT_CODES = frozenset(code for code in ERROR_CODES if code.endswith("CONFLICT"))

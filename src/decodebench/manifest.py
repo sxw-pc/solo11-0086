@@ -43,13 +43,14 @@ def build_file_entry(
     evidence: list[Evidence],
     candidates: list[CandidateResult],
     decision: Decision,
-    transcode: TranscodeResult,
+    transcode: TranscodeResult | None,
     mojibake: MojibakeReport,
     warnings: list[WarningItem],
+    delivery: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     bom = detect_bom(raw)
     warning_rows = _warning_rows(warnings)
-    return {
+    entry = {
         "rel_path": source.rel_path,
         "source_size": source.size,
         "source_sha256": source.sha256,
@@ -63,11 +64,14 @@ def build_file_entry(
         "evidence": [item.to_dict() for item in evidence],
         "statistical_candidates": [item.to_dict() for item in candidates],
         "decision": decision.to_dict(),
-        "transcode": transcode.to_dict(),
+        "transcode": transcode.to_dict() if transcode is not None else None,
         "mojibake": mojibake.to_dict(),
         "warnings": warning_rows,
         "warning_count": len(warning_rows),
     }
+    if delivery is not None:
+        entry["delivery"] = delivery
+    return entry
 
 
 def summarize(files: list[dict[str, Any]]) -> dict[str, Any]:
@@ -79,18 +83,27 @@ def summarize(files: list[dict[str, Any]]) -> dict[str, Any]:
     transcoded = 0
     failed = 0
     with_warnings = 0
+    auto_delivered = 0
+    gate_rejected = 0
     for item in files:
         decision = item["decision"]
         if decision["conflicts"]:
             conflicts += 1
-        if item["transcode"]["success"]:
+        transcode_row = item["transcode"]
+        if transcode_row is not None and transcode_row["success"]:
             transcoded += 1
-        else:
+        elif transcode_row is not None:
             failed += 1
         methods[str(decision["method"])] += 1
         risks[str(item["mojibake"]["level"])] += 1
         if item["warnings"]:
             with_warnings += 1
+        delivery = item.get("delivery")
+        if delivery is not None:
+            if delivery["auto_deliver"]:
+                auto_delivered += 1
+            else:
+                gate_rejected += 1
         for warning in item["warnings"]:
             code = str(warning["code"])
             warning_counter[code] += 1
@@ -101,7 +114,7 @@ def summarize(files: list[dict[str, Any]]) -> dict[str, Any]:
         {"code": code, "count": warning_counter[code], "severity": warning_severity[code]}
         for code in sorted(warning_counter)
     ]
-    return {
+    summary = {
         "files_total": len(files),
         "conflict_files": conflicts,
         "transcode_success": transcoded,
@@ -116,6 +129,10 @@ def summarize(files: list[dict[str, Any]]) -> dict[str, Any]:
             {"level": level, "count": risks.get(level, 0)} for level in RISK_LEVELS
         ],
     }
+    if any(item.get("delivery") is not None for item in files):
+        summary["gate_auto_delivered"] = auto_delivered
+        summary["gate_rejected"] = gate_rejected
+    return summary
 
 
 def build_manifest(

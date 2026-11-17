@@ -19,24 +19,46 @@ def build_report(
     files: list[dict[str, Any]] = []
     for item in manifest["files"]:
         decision = item["decision"]
-        files.append(
-            {
-                "rel_path": item["rel_path"],
-                "encoding": decision["encoding"],
-                "confidence": decision["confidence"],
-                "method": decision["method"],
-                "conflict": bool(decision["conflicts"]),
-                "error_codes": list(decision["error_codes"]),
-                "transcode_success": bool(item["transcode"]["success"]),
-                "output_rel_path": item["transcode"]["output_rel_path"],
-                "output_sha256": item["transcode"]["output_sha256"],
-                "risk_level": item["mojibake"]["level"],
-                "warning_count": item["warning_count"],
-                "warning_codes": sorted({str(row["code"]) for row in item["warnings"]}),
+        delivery = item.get("delivery")
+        row = {
+            "rel_path": item["rel_path"],
+            "encoding": decision["encoding"],
+            "confidence": decision["confidence"],
+            "method": decision["method"],
+            "conflict": bool(decision["conflicts"]),
+            "error_codes": list(decision["error_codes"]),
+            "transcode_success": (
+                bool(item["transcode"]["success"]) if item["transcode"] else False
+            ),
+            "output_rel_path": (
+                item["transcode"]["output_rel_path"] if item["transcode"] else None
+            ),
+            "output_sha256": (
+                item["transcode"]["output_sha256"] if item["transcode"] else None
+            ),
+            "risk_level": item["mojibake"]["level"],
+            "warning_count": item["warning_count"],
+            "warning_codes": sorted({str(row["code"]) for row in item["warnings"]}),
+        }
+        if delivery is not None:
+            row["delivery"] = {
+                "contract": delivery["contract"],
+                "auto_deliver": bool(delivery["auto_deliver"]),
+                "rule_id": delivery["rule_id"],
+                "text_equivalence_class": delivery["text_equivalence_class"],
+                "label_certain": bool(delivery["label_certain"]),
+                "encoding_attribution_resolved": bool(
+                    delivery["encoding_attribution_resolved"]
+                ),
+                "reject_reasons": list(delivery["reject_reasons"]),
+                "risk_budget": delivery["risk_budget"],
+                "validated_error_rate_upper_bound": delivery[
+                    "validated_error_rate_upper_bound"
+                ],
             }
-        )
+        files.append(row)
     files.sort(key=lambda row: str(row["rel_path"]))
-    return {
+    report = {
         "schema_version": "1.0",
         "project": "decodebench",
         "generated_at": now,
@@ -49,6 +71,9 @@ def build_report(
         "files": files,
         "ledger": ledger_summary,
     }
+    if "risk_gate" in manifest:
+        report["risk_gate"] = manifest["risk_gate"]
+    return report
 
 
 def _cell(value: object) -> str:
@@ -108,11 +133,47 @@ def render_markdown(report: dict[str, Any]) -> str:
                 confidence=float(item["confidence"]),
                 method=_cell(item["method"]),
                 conflict="是" if item["conflict"] else "否",
-                transcode="成功" if item["transcode_success"] else "失败",
+                transcode="成功" if item["transcode_success"] else "失败/拒判",
                 risk=_cell(item["risk_level"]),
                 warnings=item["warning_count"],
             )
         )
+    if "risk_gate" in report:
+        gate = report["risk_gate"]
+        lines.extend(
+            [
+                "",
+                "## 风险校准门槛",
+                "",
+                f"- 发布合同：`{gate['contract']}`",
+                f"- 规则版本：`{gate['rule_version']}`",
+                f"- 标注摘要：`{gate['annotation_digest']}`",
+                f"- 候选编码集合：{', '.join(gate['candidate_encodings'])}",
+                f"- 风险预算：{gate['risk_budget']:.6f}",
+                f"- 独立验证单侧精确上界：{gate['validated_error_rate_upper_bound']}",
+                f"- 规则已推广：{'是' if gate['promoted'] else '否（全部拒判）'}",
+                "",
+                "| 相对路径 | 自动交付 | 规则 | 文本等价类 | 标签确定 | 编码归因 | 拒判原因 |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for item in report["files"]:
+            delivery = item.get("delivery")
+            if delivery is None:
+                continue
+            lines.append(
+                "| {path} | {deliver} | {rule} | {equiv} | {label} | {attribution} | {reasons} |".format(
+                    path=_cell(item["rel_path"]),
+                    deliver="是" if delivery["auto_deliver"] else "否",
+                    rule=_cell(delivery["rule_id"] or "-"),
+                    equiv=_cell(delivery["text_equivalence_class"]),
+                    label="是" if delivery["label_certain"] else "否",
+                    attribution=(
+                        "已定" if delivery["encoding_attribution_resolved"] else "未定"
+                    ),
+                    reasons=_cell("、".join(delivery["reject_reasons"]) or "-"),
+                )
+            )
     lines.extend(
         [
             "",
